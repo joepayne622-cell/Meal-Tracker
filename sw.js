@@ -1,48 +1,33 @@
-const CACHE_NAME = "macro-tracker-v3";
-const ASSETS = ["/", "/index.html"];
+const CACHE_NAME = "macro-tracker-v4";
 
-self.addEventListener("install", (e) => {
-  e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
-  );
-  self.skipWaiting();
-});
+// On install, skip waiting immediately
+self.addEventListener("install", () => self.skipWaiting());
 
+// On activate, clear ALL old caches and take control
 self.addEventListener("activate", (e) => {
   e.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
+      Promise.all(keys.map((k) => caches.delete(k)))
+    ).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
+// Network-first strategy: always try network, fall back to cache
 self.addEventListener("fetch", (e) => {
+  // Only handle GET requests for our own pages
+  if (e.request.method !== "GET") return;
+
   e.respondWith(
-    caches.match(e.request).then((cached) => cached || fetch(e.request))
-  );
-});
-const CACHE_NAME = "macro-tracker-v3";
-const ASSETS = ["/", "/index.html"];
-
-self.addEventListener("install", (e) => {
-  e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
-  );
-  self.skipWaiting();
-});
-
-self.addEventListener("activate", (e) => {
-  e.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
-  );
-  self.clients.claim();
-});
-
-self.addEventListener("fetch", (e) => {
-  e.respondWith(
-    caches.match(e.request).then((cached) => cached || fetch(e.request))
+    fetch(e.request)
+      .then((response) => {
+        // Cache a copy of the fresh response
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(e.request, clone));
+        return response;
+      })
+      .catch(() =>
+        // Network failed — serve from cache as fallback
+        caches.match(e.request)
+      )
   );
 });
