@@ -815,8 +815,62 @@
                 "Legs": ["Squat","Romanian Deadlift","Leg Press","Leg Curl","Leg Extension","Lunge","Bulgarian Split Squat","Hip Thrust","Calf Raise","Hack Squat","Goblet Squat"],
                 "Core": ["Plank","Crunch","Hanging Leg Raise","Cable Crunch","Ab Rollout","Russian Twist","Bicycle Crunch","Dead Bug","Side Plank"],
                 "Full Body": ["Clean","Snatch","Thruster","Farmer Carry","Battle Ropes","Kettlebell Swing","Turkish Get Up","Box Jump","Burpee"],
+                "Bodyweight - Upper": [
+                  "Push Up","Wide Push Up","Diamond Push Up","Decline Push Up","Incline Push Up","Archer Push Up","Pike Push Up","Pseudo Planche Push Up",
+                  "Pull Up","Chin Up","Neutral Grip Pull Up","Commando Pull Up","Typewriter Pull Up","Negative Pull Up",
+                  "Dip","Ring Dip","Tricep Dip","Chair Dip",
+                  "Inverted Row","Australian Pull Up","Bodyweight Row",
+                  "Wall Handstand Hold","Handstand Push Up","Pike Hold",
+                ],
+                "Bodyweight - Lower": [
+                  "Bodyweight Squat","Jump Squat","Pistol Squat","Assisted Pistol Squat","Sissy Squat",
+                  "Reverse Lunge","Forward Lunge","Walking Lunge","Jump Lunge","Lateral Lunge","Curtsy Lunge",
+                  "Glute Bridge","Single Leg Glute Bridge","Hip Thrust","Frog Pump",
+                  "Step Up","Box Jump","Broad Jump","Single Leg Deadlift",
+                  "Wall Sit","Calf Raise","Single Leg Calf Raise","Donkey Kick","Fire Hydrant",
+                ],
+                "Bodyweight - Core": [
+                  "Plank","Side Plank","Reverse Plank","Hollow Body Hold","Superman Hold",
+                  "Crunch","Bicycle Crunch","Reverse Crunch","Toe Touch Crunch","V-Up","Tuck V-Up",
+                  "Leg Raise","Flutter Kick","Scissor Kick","Dead Bug","Bird Dog",
+                  "Mountain Climber","Sprawl","Ab Rollout","Dragon Flag","L-Sit Hold",
+                  "Russian Twist","Windmill","Side Bend",
+                ],
+                "Bodyweight - Full Body": [
+                  "Burpee","Burpee Pull Up","No Push Up Burpee","Half Burpee",
+                  "Bear Crawl","Crab Walk","Inchworm","Walkout","Seal Walk",
+                  "Box Jump","Broad Jump","Tuck Jump","Star Jump","Split Jump",
+                  "Sprawl to Push Up","Squat to Push Up","Man Maker",
+                  "Turkish Get Up","Windmill","Lateral Shuffle","High Knees","Butt Kicks",
+                ],
+                "Animal Flow": [
+                  "Beast Hold","Beast Reach","Beast to Crab","Crab Hold","Crab Reach",
+                  "Ape Hold","Ape Reach","Ape to Squat","Loaded Beast","Loaded Crab",
+                  "Scorpion Reach","Front Kick Through","Side Kick Through","Under Switch",
+                  "Wrist Mobilization","Traveling Beast","Traveling Crab","Traveling Ape",
+                  "Forward Underswitches","Lateral Underswitches","Rotational Underswitches",
+                  "Front Sweep","Back Sweep","Side Sweep",
+                  "Frog Squat","Frog to Squat","Deep Squat Hold","Cossack Squat",
+                  "Shoulder Roll Forward","Shoulder Roll Backward","Hip Circle","Spine Wave",
+                  "Flow Combination A (Beast-Crab)","Flow Combination B (Ape-Kick Through)","Free Flow",
+                ],
+                "Mobility & Stretch": [
+                  "Hip Flexor Stretch","Pigeon Pose","Figure Four Stretch","Butterfly Stretch",
+                  "World's Greatest Stretch","Thoracic Rotation","Cat-Cow","Child's Pose",
+                  "Downward Dog","Lizard Pose","Couch Stretch","Quad Stretch",
+                  "90/90 Hip Stretch","Deep Squat Hold","Ankle Circles","Wrist Circles",
+                ],
               };
-              const CARDIO_TYPES = ["Running","Walking","Cycling","Elliptical","Rowing","Swimming","Jump Rope","Stair Climber","HIIT","Other"];
+              const CARDIO_TYPES = [
+                "Running","Walking","Hiking","Cycling - Indoor","Cycling - Outdoor","Mountain Biking",
+                "Indoor Rowing","Elliptical","Swimming","Jump Rope","Stair Climber",
+                "HIIT","Circuit Training","Other",
+              ];
+              const CARDIO_ICONS = {
+                "Running":"🏃","Walking":"🚶","Hiking":"🥾","Cycling - Indoor":"🚴","Cycling - Outdoor":"🚴",
+                "Mountain Biking":"🚵","Indoor Rowing":"🚣","Elliptical":"⚡","Swimming":"🏊",
+                "Jump Rope":"🪢","Stair Climber":"🪜","HIIT":"🔥","Circuit Training":"💪","Other":"🏅",
+              };
               const allExercises = Object.values(EXERCISES).flat();
 
               // PR tracking — find best set per exercise across all workouts
@@ -1086,19 +1140,48 @@
                               {CARDIO_TYPES.map(t => (
                                 <button key={t} onClick={() => setCardioForm(f => ({...f, type: t}))}
                                   style={{ padding: "7px 12px", borderRadius: 99, border: cardioForm.type===t ? `2px solid ${C.green}` : `2px solid ${C.border}`, background: cardioForm.type===t ? C.greenLight : C.bg, color: cardioForm.type===t ? C.green : C.textMid, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
-                                  {t}
+                                  {CARDIO_ICONS[t]} {t}
                                 </button>
                               ))}
                             </div>
                           </div>
                           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 10 }}>
-                            {[{k:"duration",l:"Duration (min)",p:"30"},{k:"distance",l:"Distance (mi)",p:"3.1"},{k:"calories",l:"Calories",p:"300"}].map(f => (
+                            {[
+                              {k:"duration", l:"Duration (min)", p:"30"},
+                              {k:"distance", l: cardioForm.type==="Indoor Rowing" ? "Distance (m)" : "Distance (mi)", p: cardioForm.type==="Indoor Rowing" ? "2000" : "3.1"},
+                              {k:"calories", l:"Calories", p:"300"},
+                            ].map(f => (
                               <div key={f.k}>
                                 <label style={{ fontSize: 11, color: C.textMid, fontWeight: 700, display: "block", marginBottom: 4 }}>{f.l}</label>
                                 <input type="number" placeholder={f.p} value={cardioForm[f.k]} onChange={e => setCardioForm(cf => ({...cf, [f.k]: e.target.value}))} style={inputS} />
                               </div>
                             ))}
                           </div>
+                          {/* Sport-specific extras */}
+                          {(cardioForm.type === "Indoor Rowing") && (
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+                              <div>
+                                <label style={{ fontSize: 11, color: C.textMid, fontWeight: 700, display: "block", marginBottom: 4 }}>Split (/500m)</label>
+                                <input placeholder="2:00" value={cardioForm.split||""} onChange={e => setCardioForm(f=>({...f,split:e.target.value}))} style={inputS} />
+                              </div>
+                              <div>
+                                <label style={{ fontSize: 11, color: C.textMid, fontWeight: 700, display: "block", marginBottom: 4 }}>Avg SPM</label>
+                                <input type="number" placeholder="24" value={cardioForm.spm||""} onChange={e => setCardioForm(f=>({...f,spm:e.target.value}))} style={inputS} />
+                              </div>
+                            </div>
+                          )}
+                          {(cardioForm.type === "Cycling - Indoor" || cardioForm.type === "Cycling - Outdoor" || cardioForm.type === "Mountain Biking") && (
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+                              <div>
+                                <label style={{ fontSize: 11, color: C.textMid, fontWeight: 700, display: "block", marginBottom: 4 }}>Avg Speed (mph)</label>
+                                <input type="number" placeholder="15" value={cardioForm.speed||""} onChange={e => setCardioForm(f=>({...f,speed:e.target.value}))} style={inputS} />
+                              </div>
+                              <div>
+                                <label style={{ fontSize: 11, color: C.textMid, fontWeight: 700, display: "block", marginBottom: 4 }}>{cardioForm.type==="Cycling - Indoor" ? "Avg Watts" : "Elevation (ft)"}</label>
+                                <input type="number" placeholder={cardioForm.type==="Cycling - Indoor"?"200":"500"} value={cardioForm.extra||""} onChange={e => setCardioForm(f=>({...f,extra:e.target.value}))} style={inputS} />
+                              </div>
+                            </div>
+                          )}
                           <input placeholder="Notes (optional)" value={cardioForm.notes} onChange={e => setCardioForm(f => ({...f, notes: e.target.value}))} style={{ ...inputS, width: "100%", marginBottom: 10 }} />
                           <div style={{ display: "flex", gap: 8 }}>
                             <button onClick={() => setShowCardioForm(false)} style={{ flex: 1, padding: "11px", borderRadius: 12, border: `1.5px solid ${C.border}`, background: C.bg, color: C.textMid, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
@@ -1126,7 +1209,7 @@
                               )}
                               {w.type === "cardio" && (
                                 <div style={{ fontSize: 11, color: C.textLight, fontWeight: 600 }}>
-                                  {w.type} {w.duration && `· ${w.duration} min`}{w.distance && ` · ${w.distance} mi`}{w.calories && ` · ${w.calories} cal`}
+                                  {w.duration && `${w.duration} min`}{w.distance && ` · ${w.distance}${w.type==="Indoor Rowing"?"m":" mi"}`}{w.calories && ` · ${w.calories} cal`}{w.split && ` · ${w.split}/500m`}{w.spm && ` · ${w.spm} spm`}{w.speed && ` · ${w.speed} mph`}{w.extra && ` · ${w.type==="Cycling - Indoor"?w.extra+" W":w.extra+" ft gain`}`}
                                 </div>
                               )}
                             </div>
@@ -1179,7 +1262,7 @@
                             </div>
                           ))}
                           {w.type === "cardio" && (
-                            <div style={{ fontSize: 12, color: C.textMid }}>{w.type} · {w.duration}min{w.distance?` · ${w.distance}mi`:""}{w.calories?` · ${w.calories}cal`:""}</div>
+                            <div style={{ fontSize: 12, color: C.textMid }}>{w.type} · {w.duration}min{w.distance?` · ${w.distance}${w.type==="Indoor Rowing"?"m":" mi"}`:""}{w.calories?` · ${w.calories}cal`:""}{w.split?` · ${w.split}/500m`:""}{w.speed?` · ${w.speed}mph`:""}</div>
                           )}
                         </div>
                       ))}
