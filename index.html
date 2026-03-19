@@ -504,6 +504,22 @@
       { name: "Ginger Snap Homemade (1 / 20g)", calories: 85, protein: 1, carbs: 13, fat: 3 },
       { name: "Cookie Dough Raw (2 tbsp / 30g)", calories: 145, protein: 1, carbs: 19, fat: 7 },
       { name: "Cookie Batch Dozen Chocolate Chip (whole)", calories: 1780, protein: 24, carbs: 240, fat: 84 },
+      // Premier Protein Shakes
+      { name: "Premier Protein Chocolate Shake (11.5 fl oz)", calories: 160, protein: 30, carbs: 5, fat: 3 },
+      { name: "Premier Protein Vanilla Shake (11.5 fl oz)", calories: 160, protein: 30, carbs: 5, fat: 3 },
+      { name: "Premier Protein Caramel Shake (11.5 fl oz)", calories: 160, protein: 30, carbs: 5, fat: 3 },
+      { name: "Premier Protein Strawberries & Cream Shake (11.5 fl oz)", calories: 160, protein: 30, carbs: 5, fat: 3 },
+      { name: "Premier Protein Cafe Latte Shake (11.5 fl oz)", calories: 160, protein: 30, carbs: 5, fat: 3 },
+      { name: "Premier Protein Bananas & Cream Shake (11.5 fl oz)", calories: 160, protein: 30, carbs: 5, fat: 3 },
+      { name: "Premier Protein Peaches & Cream Shake (11.5 fl oz)", calories: 160, protein: 30, carbs: 5, fat: 3 },
+      { name: "Premier Protein Cookies & Cream Shake (11.5 fl oz)", calories: 160, protein: 30, carbs: 5, fat: 3 },
+      { name: "Premier Protein Cake Batter Delight Shake (11.5 fl oz)", calories: 160, protein: 30, carbs: 5, fat: 3 },
+      // Premier Protein Powder
+      { name: "Premier Protein Powder Chocolate (1 scoop / 36g)", calories: 150, protein: 30, carbs: 5, fat: 2 },
+      { name: "Premier Protein Powder Vanilla (1 scoop / 36g)", calories: 150, protein: 30, carbs: 5, fat: 2 },
+      // Premier Protein Bars
+      { name: "Premier Protein Bar Chocolate Brownie (1 bar / 40g)", calories: 190, protein: 30, carbs: 25, fat: 6 },
+      { name: "Premier Protein Bar Chocolate Peanut Butter (1 bar / 40g)", calories: 190, protein: 30, carbs: 24, fat: 7 },
     ];
 
     const MEAL_TYPES = ["Breakfast", "Lunch", "Dinner", "Snack"];
@@ -821,7 +837,7 @@
 
               // Workout stats
               const totalWorkouts = Object.values(workouts).flat().length;
-              const totalSets = Object.values(workouts).flat().filter(w=>w.type==="lifting").reduce((a,w)=>a+w.exercises.reduce((b,e)=>b+e.sets.filter(s=>s.done).length,0),0);
+              const totalSets = Object.values(workouts).flat().filter(w=>w.type==="workout"||w.type==="lifting").reduce((a,w)=>a+(w.exercises||[]).filter(e=>!e.isCardio).reduce((b,e)=>b+e.sets.filter(s=>s.done).length,0),0);
 
               // Log weight
               const logWeight = () => {
@@ -1043,8 +1059,10 @@
                       </div>
                       {(workouts[selectedDate]||[]).map(w => (
                         <div key={w.id} style={{ fontSize: 13, color: C.textMid, marginBottom: 6, paddingBottom: 6, borderBottom: `1px solid ${C.border}` }}>
-                          <span style={{ fontWeight: 800, color: C.text }}>{w.type==="cardio"?"🏃":"🏋️"} {w.name||w.type}</span>
-                          {w.type==="lifting" && <span style={{ color: C.textLight }}> · {w.exercises?.length||0} exercises</span>}
+                          <span style={{ fontWeight: 800, color: C.text }}>
+                            {w.type==="cardio" ? `${(CARDIO_META[w.cardioType||"Other"]||{icon:"🏃"}).icon} ${w.cardioType||w.name||"Cardio"}` : `🏋️ ${w.name||"Workout"}`}
+                          </span>
+                          {(w.type==="workout"||w.type==="lifting") && <span style={{ color: C.textLight }}> · {(w.exercises||[]).filter(e=>!e.isCardio).length} exercises{(w.exercises||[]).filter(e=>e.isCardio).length>0?` · ${(w.exercises||[]).filter(e=>e.isCardio).length} cardio`:""}</span>}
                           {w.type==="cardio" && w.duration && <span style={{ color: C.textLight }}> · {w.duration} min</span>}
                         </div>
                       ))}
@@ -1301,7 +1319,97 @@
               const CARDIO_TYPES = Object.keys(CARDIO_META);
 
               const EXERCISES = {
-                "Cardio": CARDIO_TYPES,
+                "🏃 Cardio": CARDIO_TYPES,
+                "Chest": ["Bench Press","Incline Bench Press","Decline Bench Press","Dumbbell Fly","Cable Fly","Push Up","Chest Dip","Landmine Press"],
+                "Chest - Dumbbell": [
+                  "Dumbbell Flat Bench Press","Dumbbell Incline Bench Press","Dumbbell Decline Bench Press",
+                  "Dumbbell Fly","Dumbbell Incline Fly","Dumbbell Pullover",
+                  "Single Arm Dumbbell Press","Squeeze Press","Floor Press",
+                ],
+                "Back": ["Deadlift","Pull Up","Lat Pulldown","Bent Over Row","Seated Row","T-Bar Row","Single Arm Row","Face Pull","Shrug"],
+                "Shoulders": ["Overhead Press","Dumbbell Shoulder Press","Lateral Raise","Front Raise","Rear Delt Fly","Arnold Press","Upright Row"],
+                "Shoulders - Dumbbell": [
+                  "Dumbbell Overhead Press","Dumbbell Arnold Press","Dumbbell Lateral Raise",
+                  "Dumbbell Front Raise","Dumbbell Rear Delt Fly","Dumbbell Upright Row",
+                  "Single Arm Dumbbell Press","Dumbbell Shrug","W-Raise","Y-Raise","T-Raise",
+                  "Dumbbell Cuban Press","Bent Over Lateral Raise","Seated Dumbbell Press",
+                ],
+                "Biceps": ["Barbell Curl","Dumbbell Curl","Hammer Curl","Preacher Curl","Cable Curl","Concentration Curl","Spider Curl"],
+                "Triceps": ["Tricep Pushdown","Skull Crusher","Overhead Tricep Extension","Dip","Close Grip Bench","Diamond Push Up","Kickback"],
+                "Legs": ["Squat","Romanian Deadlift","Leg Press","Leg Curl","Leg Extension","Lunge","Bulgarian Split Squat","Hip Thrust","Calf Raise","Hack Squat","Goblet Squat"],
+                "Legs - Dumbbell": [
+                  "Dumbbell Goblet Squat","Dumbbell Romanian Deadlift","Dumbbell Sumo Deadlift",
+                  "Dumbbell Lunge","Dumbbell Reverse Lunge","Dumbbell Walking Lunge",
+                  "Dumbbell Bulgarian Split Squat","Dumbbell Step Up","Dumbbell Hip Thrust",
+                  "Dumbbell Stiff Leg Deadlift","Dumbbell Lateral Lunge","Dumbbell Calf Raise",
+                  "Dumbbell Good Morning","Dumbbell Curtsy Lunge","Single Leg Dumbbell RDL",
+                ],
+                "Core": ["Plank","Crunch","Hanging Leg Raise","Cable Crunch","Ab Rollout","Russian Twist","Bicycle Crunch","Dead Bug","Side Plank"],
+                "Full Body": ["Clean","Snatch","Thruster","Farmer Carry","Battle Ropes","Kettlebell Swing","Turkish Get Up","Box Jump","Burpee"],
+                "TRX / Suspension": [
+                  "TRX Push Up","TRX Chest Press","TRX Chest Fly","TRX Atomic Push Up",
+                  "TRX Row","TRX High Row","TRX Low Row","TRX Rear Delt Fly","TRX Y-Fly","TRX T-Fly","TRX W-Fly",
+                  "TRX Bicep Curl","TRX Tricep Extension","TRX Overhead Press",
+                  "TRX Squat","TRX Single Leg Squat","TRX Lunge","TRX Hip Press","TRX Hamstring Curl","TRX Hip Hinge",
+                  "TRX Plank","TRX Side Plank","TRX Mountain Climber","TRX Pike","TRX Knee Tuck","TRX Crunch","TRX Oblique Crunch",
+                  "TRX Burpee","TRX Jump Squat","TRX Sprinter Start","TRX Power Pull",
+                ],
+                "Bodyweight - Upper": [
+                  "Push Up","Wide Push Up","Diamond Push Up","Decline Push Up","Incline Push Up","Archer Push Up","Pike Push Up","Pseudo Planche Push Up",
+                  "Pull Up","Chin Up","Neutral Grip Pull Up","Commando Pull Up","Typewriter Pull Up","Negative Pull Up",
+                  "Dip","Ring Dip","Tricep Dip","Chair Dip","Inverted Row","Australian Pull Up","Bodyweight Row",
+                  "Wall Handstand Hold","Handstand Push Up","Pike Hold",
+                ],
+                "Bodyweight - Lower": [
+                  "Bodyweight Squat","Jump Squat","Pistol Squat","Assisted Pistol Squat","Sissy Squat",
+                  "Reverse Lunge","Forward Lunge","Walking Lunge","Jump Lunge","Lateral Lunge","Curtsy Lunge",
+                  "Glute Bridge","Single Leg Glute Bridge","Hip Thrust","Frog Pump",
+                  "Step Up","Box Jump","Broad Jump","Single Leg Deadlift",
+                  "Wall Sit","Calf Raise","Single Leg Calf Raise","Donkey Kick","Fire Hydrant",
+                ],
+                "Bodyweight - Core": [
+                  "Plank","Side Plank","Reverse Plank","Hollow Body Hold","Superman Hold",
+                  "Crunch","Bicycle Crunch","Reverse Crunch","Toe Touch Crunch","V-Up","Tuck V-Up",
+                  "Leg Raise","Flutter Kick","Scissor Kick","Dead Bug","Bird Dog",
+                  "Mountain Climber","Sprawl","Ab Rollout","Dragon Flag","L-Sit Hold",
+                  "Russian Twist","Windmill","Side Bend",
+                ],
+                "Bodyweight - Full Body": [
+                  "Burpee","Burpee Pull Up","No Push Up Burpee","Half Burpee",
+                  "Bear Crawl","Crab Walk","Inchworm","Walkout","Seal Walk",
+                  "Box Jump","Broad Jump","Tuck Jump","Star Jump","Split Jump",
+                  "Sprawl to Push Up","Squat to Push Up","Man Maker",
+                  "Turkish Get Up","Windmill","Lateral Shuffle","High Knees","Butt Kicks",
+                ],
+                "Boxing": [
+                  "Jab","Cross","Hook","Uppercut","Jab-Cross (1-2)","Jab-Cross-Hook (1-2-3)",
+                  "Jab-Cross-Hook-Cross (1-2-3-2)","Jab-Cross-Lead Hook-Rear Uppercut",
+                  "Body Jab","Body Cross","Body Hook","Overhand Right",
+                  "Slip Left","Slip Right","Roll Under","Parry","Bob and Weave",
+                  "Shadowboxing","Heavy Bag Work","Speed Bag","Double End Bag","Mitts",
+                  "Sparring","Footwork Drills","Defense Drills",
+                  "Box Jump (Boxing)","Squat to Uppercut","Lunge to Hook",
+                  "Plank Punches","Push Up to Jab","Jump Rope (Boxing)",
+                ],
+                "Animal Flow": [
+                  "Beast Hold","Beast Reach","Beast to Crab","Crab Hold","Crab Reach",
+                  "Ape Hold","Ape Reach","Ape to Squat","Loaded Beast","Loaded Crab",
+                  "Scorpion Reach","Front Kick Through","Side Kick Through","Under Switch",
+                  "Wrist Mobilization","Traveling Beast","Traveling Crab","Traveling Ape",
+                  "Forward Underswitches","Lateral Underswitches","Rotational Underswitches",
+                  "Front Sweep","Back Sweep","Side Sweep",
+                  "Frog Squat","Frog to Squat","Deep Squat Hold","Cossack Squat",
+                  "Shoulder Roll Forward","Shoulder Roll Backward","Hip Circle","Spine Wave",
+                  "Flow Combination A (Beast-Crab)","Flow Combination B (Ape-Kick Through)","Free Flow",
+                ],
+                "Mobility & Stretch": [
+                  "Hip Flexor Stretch","Pigeon Pose","Figure Four Stretch","Butterfly Stretch",
+                  "World's Greatest Stretch","Thoracic Rotation","Cat-Cow","Child's Pose",
+                  "Downward Dog","Lizard Pose","Couch Stretch","Quad Stretch",
+                  "90/90 Hip Stretch","Deep Squat Hold","Ankle Circles","Wrist Circles",
+                ],
+              };
+              const allExercises = Object.values(EXERCISES).flat();
                 "Chest": ["Bench Press","Incline Bench Press","Decline Bench Press","Dumbbell Fly","Cable Fly","Push Up","Chest Dip","Landmine Press"],
                 "Back": ["Deadlift","Pull Up","Lat Pulldown","Bent Over Row","Seated Row","T-Bar Row","Single Arm Row","Face Pull","Shrug"],
                 "Shoulders": ["Overhead Press","Dumbbell Shoulder Press","Lateral Raise","Front Raise","Rear Delt Fly","Arnold Press","Upright Row"],
@@ -1371,8 +1479,8 @@
               const allWorkoutDays = Object.values(workouts).flat();
               const prs = {};
               allWorkoutDays.forEach(w => {
-                if (w.type === "lifting") {
-                  w.exercises.forEach(ex => {
+                if (w.type === "workout" || w.type === "lifting") {
+                  (w.exercises||[]).filter(e=>!e.isCardio).forEach(ex => {
                     ex.sets.forEach(s => {
                       if (s.weight && s.reps) {
                         const vol = parseFloat(s.weight) * parseFloat(s.reps);
@@ -1407,7 +1515,7 @@
 
               const startLifting = (routine=null) => {
                 const w = {
-                  id: Date.now(), type: "lifting", date: workoutDate,
+                  id: Date.now(), type: "workout", date: workoutDate,
                   name: routine ? routine.name : "Workout",
                   exercises: routine ? routine.exercises.map(e=>({name:e,sets:[{weight:"",reps:"",done:false}]})) : [],
                   startTime: Date.now(), endTime: null, notes: ""
@@ -1437,19 +1545,20 @@
 
               const addSingleExercise = (name) => {
                 if (CARDIO_META[name]) {
+                  // If there's an active workout open, stay in it and show cardio form
                   setCardioForm(f => ({ ...f, type: name }));
                   setShowCardioForm(true);
-                  setWorkoutTab("log");
+                  setWorkoutTab(activeWorkout ? "active" : "log");
                   setExerciseSearch("");
                   return;
                 }
                 const todayWorkouts = workouts[workoutDate] || [];
-                const existing = todayWorkouts.find(w => w.type === "lifting" && !w.endTime);
+                const existing = todayWorkouts.find(w => w.type === "workout" && !w.endTime);
                 if (existing) {
                   const updated = { ...existing, exercises: [...existing.exercises, { name, sets: [{weight:"",reps:"",done:false}] }] };
                   setActiveWorkout(updated);
                 } else {
-                  const w = { id: Date.now(), type: "lifting", date: workoutDate, name: "Workout", exercises: [{ name, sets: [{weight:"",reps:"",done:false}] }], startTime: Date.now(), endTime: null, notes: "" };
+                  const w = { id: Date.now(), type: "workout", date: workoutDate, name: "Workout", exercises: [{ name, sets: [{weight:"",reps:"",done:false}] }], startTime: Date.now(), endTime: null, notes: "" };
                   setActiveWorkout(w);
                 }
                 setWorkoutTab("active");
@@ -1499,14 +1608,26 @@
               const logCardio = () => {
                 if (!cardioForm.duration) return;
                 if (editingCardio) {
+                  // Editing a saved standalone cardio entry
                   const updated = { ...editingCardio, ...cardioForm };
                   saveWorkout(updated);
                   setEditingCardio(null);
                   showToast("Cardio updated!");
+                } else if (activeWorkout) {
+                  // Add as a cardio block inside the active workout
+                  const cardioBlock = {
+                    name: cardioForm.type,
+                    isCardio: true,
+                    cardioData: { ...cardioForm },
+                    sets: [{ done: true }],
+                  };
+                  setActiveWorkout(prev => ({ ...prev, exercises: [...prev.exercises, cardioBlock] }));
+                  showToast(`${cardioForm.type} added to workout! 🏃`);
                 } else {
-                  const w = { id: Date.now(), type: "cardio", date: workoutDate, ...cardioForm };
+                  // Standalone cardio entry
+                  const w = { id: Date.now(), type: "cardio", cardioType: cardioForm.type, name: cardioForm.type, date: workoutDate, ...cardioForm };
                   setWorkouts(prev => ({ ...prev, [workoutDate]: [...(prev[workoutDate]||[]), w] }));
-                  showToast("Cardio logged! 🏃");
+                  showToast(`${cardioForm.type} logged! 🏃`);
                 }
                 setCardioForm({ type: "Running", duration: "", distance: "", calories: "", notes: "" });
                 setShowCardioForm(false);
@@ -1554,9 +1675,32 @@
                       </div>
                     </div>
 
-                    {/* Exercises */}
+                    {/* Exercises (strength + inline cardio) */}
                     {activeWorkout.exercises.map((ex, exIdx) => {
                       const pr = prs[ex.name];
+                      // Cardio block — show summary card
+                      if (ex.isCardio) {
+                        const meta = CARDIO_META[ex.name] || {};
+                        const cd = ex.cardioData || {};
+                        return (
+                          <div key={exIdx} style={{ background: C.card, borderRadius: 16, border: `1.5px solid ${C.green}22`, padding: 14, marginBottom: 12, boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                              <div>
+                                <div style={{ fontSize: 15, fontWeight: 800, color: C.text }}>{meta.icon||"🏃"} {ex.name}</div>
+                                <div style={{ fontSize: 12, color: C.textLight, fontWeight: 600, marginTop: 2 }}>
+                                  {cd.duration && `${cd.duration} min`}{cd.distance && ` · ${cd.distance} ${ex.name==="Indoor Rowing"?"m":"mi"}`}{cd.calories && ` · ${cd.calories} cal`}{cd.speed && ` · ${cd.speed} mph`}{cd.incline && ` · ${cd.incline}% incline`}{cd.split && ` · ${cd.split}/500m`}{cd.spm && ` · ${cd.spm} spm`}{cd.rounds && ` · ${cd.rounds} rounds`}
+                                </div>
+                                {cd.notes && <div style={{ fontSize: 11, color: C.textLight, fontStyle:"italic", marginTop:2 }}>{cd.notes}</div>}
+                              </div>
+                              <div style={{ display:"flex", gap:6 }}>
+                                <span style={{ fontSize:10, fontWeight:800, color:C.green, background:C.greenLight, padding:"3px 8px", borderRadius:99 }}>CARDIO</span>
+                                <button onClick={() => removeExercise(exIdx)} style={{ background: C.border, border:"none", color:C.textLight, width:26, height:26, borderRadius:99, fontSize:14, cursor:"pointer", fontFamily:"inherit" }}>×</button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }
+                      // Strength block
                       return (
                         <div key={exIdx} style={{ background: C.card, borderRadius: 16, border: `1px solid ${C.border}`, padding: 16, marginBottom: 12, boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
@@ -1579,7 +1723,7 @@
                               <input type="number" placeholder="10" value={s.reps} onChange={e => updateSet(exIdx,sIdx,"reps",e.target.value)}
                                 style={{ ...inputS, textAlign: "center" }} />
                               <button onClick={() => s.weight && s.reps ? updateSet(exIdx,sIdx,"done",!s.done) : removeSet(exIdx,sIdx)}
-                                style={{ height: 36, borderRadius: 10, border: "none", background: s.done ? C.green : (s.weight&&s.reps ? C.blue : C.border), color: s.done||s.weight&&s.reps ? "#fff" : C.textLight, fontWeight: 800, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+                                style={{ height: 36, borderRadius: 10, border: "none", background: s.done ? C.green : (s.weight&&s.reps ? C.blue : C.border), color: s.done||(s.weight&&s.reps) ? "#fff" : C.textLight, fontWeight: 800, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
                                 {s.done ? "✓" : (s.weight&&s.reps ? "✓" : "×")}
                               </button>
                             </div>
@@ -1764,35 +1908,39 @@
                           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 8 }}>
                             <div style={{ flex: 1 }}>
                               <div style={{ fontSize: 15, fontWeight: 800, color: C.text }}>
-                                {w.type === "cardio" ? `${CARDIO_ICONS[w.type]||"🏃"} ${w.type}` : `🏋️ ${w.name}`}
+                                {w.type === "cardio"
+                                  ? `${(CARDIO_META[w.cardioType||w.type]||{icon:"🏃"}).icon} ${w.cardioType || w.name || w.type}`
+                                  : `🏋️ ${w.name || "Workout"}`}
                               </div>
-                              {w.type === "lifting" && (
+                              {(w.type === "workout" || w.type === "lifting") && (
                                 <div style={{ fontSize: 11, color: C.textLight, fontWeight: 600 }}>
                                   {w.endTime ? `${Math.round((w.endTime-w.startTime)/60000)} min · ` : "In progress · "}
-                                  {w.exercises.length} exercise{w.exercises.length!==1?"s":""} · {w.exercises.reduce((a,e)=>a+e.sets.filter(s=>s.done).length,0)} sets done
+                                  {w.exercises.filter(e=>!e.isCardio).length} exercise{w.exercises.filter(e=>!e.isCardio).length!==1?"s":""}
+                                  {w.exercises.filter(e=>e.isCardio).length > 0 && ` · ${w.exercises.filter(e=>e.isCardio).length} cardio`}
+                                  {` · ${w.exercises.filter(e=>!e.isCardio).reduce((a,e)=>a+e.sets.filter(s=>s.done).length,0)} sets`}
                                 </div>
                               )}
                               {w.type === "cardio" && (
                                 <div style={{ fontSize: 11, color: C.textLight, fontWeight: 600 }}>
-                                  {w.duration && `${w.duration} min`}{w.distance && ` · ${w.distance}${w.type==="Indoor Rowing"?"m":" mi"}`}{w.calories && ` · ${w.calories} cal`}{w.split && ` · ${w.split}/500m`}{w.spm && ` · ${w.spm} spm`}{w.speed && ` · ${w.speed} mph`}{w.extra && ` · ${w.type==="Cycling - Indoor" ? w.extra+" W" : w.extra+" ft gain"}`}
+                                  {w.duration && `${w.duration} min`}{w.distance && ` · ${w.distance} ${(w.cardioType||w.type)==="Indoor Rowing"?"m":"mi"}`}{w.calories && ` · ${w.calories} cal`}{w.speed && ` · ${w.speed} mph`}{w.split && ` · ${w.split}/500m`}
                                 </div>
                               )}
                             </div>
-                            {/* Edit / Delete buttons */}
                             <div style={{ display: "flex", gap: 6, flexShrink: 0, marginLeft: 8 }}>
                               <button onClick={() => {
-                                if (w.type === "lifting") { editExistingWorkout(w); }
-                                else { setEditingCardio(w); setCardioForm({type:w.type,duration:w.duration||"",distance:w.distance||"",calories:w.calories||"",notes:w.notes||"",split:w.split||"",spm:w.spm||"",speed:w.speed||"",extra:w.extra||""}); setShowCardioForm(true); }
+                                if (w.type === "workout" || w.type === "lifting") { editExistingWorkout(w); }
+                                else { setEditingCardio(w); setCardioForm({type:w.cardioType||w.type||"Running",duration:w.duration||"",distance:w.distance||"",calories:w.calories||"",notes:w.notes||"",split:w.split||"",spm:w.spm||"",speed:w.speed||"",extra:w.extra||""}); setShowCardioForm(true); }
                               }} style={{ background: C.blueLight, border: "none", color: C.blue, width: 30, height: 30, borderRadius: 8, fontSize: 14, cursor: "pointer", fontFamily: "inherit", display:"flex",alignItems:"center",justifyContent:"center" }}>✏️</button>
                               <button onClick={() => deleteWorkout(w.id)} style={{ background: C.border, border: "none", color: C.textLight, width: 30, height: 30, borderRadius: 8, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>×</button>
                             </div>
                           </div>
-                          {w.type === "lifting" && w.exercises && w.exercises.map((ex, i) => (
+                          {(w.type === "workout" || w.type === "lifting") && w.exercises && w.exercises.map((ex, i) => (
                             <div key={i} style={{ fontSize: 12, color: C.textMid, marginBottom: 3, paddingLeft: 4 }}>
-                              <span style={{ fontWeight: 700 }}>{ex.name}</span>
-                              <span style={{ color: C.textLight }}>
-                                {ex.sets.filter(s=>s.done&&s.weight&&s.reps).map((s,si) => ` ${s.weight}×${s.reps}`).join(",")||` — ${ex.sets.filter(s=>s.done).length} sets`}
-                              </span>
+                              {ex.isCardio ? (
+                                <span><span style={{ fontWeight:700 }}>{(CARDIO_META[ex.name]||{icon:"🏃"}).icon} {ex.name}</span><span style={{ color:C.textLight }}>{ex.cardioData?.duration ? ` — ${ex.cardioData.duration} min` : ""}{ex.cardioData?.distance ? ` · ${ex.cardioData.distance} mi` : ""}</span></span>
+                              ) : (
+                                <span><span style={{ fontWeight: 700 }}>{ex.name}</span><span style={{ color: C.textLight }}>{ex.sets.filter(s=>s.done&&s.weight&&s.reps).map(s=>` ${s.weight}×${s.reps}`).join(",") || ` — ${ex.sets.filter(s=>s.done).length} sets`}</span></span>
+                              )}
                             </div>
                           ))}
                           {w.notes && <div style={{ marginTop: 8, fontSize: 12, color: C.textLight, fontStyle: "italic" }}>{w.notes}</div>}
@@ -1871,13 +2019,16 @@
                         <div style={{ textAlign: "center", padding: "30px 20px", color: C.textLight, fontSize: 13 }}>No workouts on this day</div>
                       ) : (workouts[workoutDate]||[]).map(w => (
                         <div key={w.id} style={{ background: C.card, borderRadius: 14, border: `1px solid ${C.border}`, padding: 14, marginBottom: 10 }}>
-                          <div style={{ fontSize: 14, fontWeight: 800, color: C.text, marginBottom: 6 }}>{w.type==="cardio"?"🏃":"🏋️"} {w.name || w.type}</div>
-                          {w.type === "lifting" && w.exercises?.map((ex,i) => (
+                          <div style={{ fontSize: 14, fontWeight: 800, color: C.text, marginBottom: 6 }}>
+                            {w.type==="cardio" ? `${(CARDIO_META[w.cardioType||w.type]||{icon:"🏃"}).icon} ${w.cardioType||w.name||"Cardio"}` : `🏋️ ${w.name||"Workout"}`}
+                          </div>
+                          {(w.type==="workout"||w.type==="lifting") && (w.exercises||[]).map((ex,i) => (
                             <div key={i} style={{ fontSize: 12, color: C.textMid, marginBottom: 2 }}>
-                              <span style={{ fontWeight: 700 }}>{ex.name}</span>
-                              {ex.sets.filter(s=>s.done&&s.weight&&s.reps).map((s,si) => (
-                                <span key={si} style={{ color: C.textLight }}> {s.weight}×{s.reps}</span>
-                              ))}
+                              {ex.isCardio ? (
+                                <span><span style={{ fontWeight:700 }}>{(CARDIO_META[ex.name]||{icon:"🏃"}).icon} {ex.name}</span><span style={{ color:C.textLight }}>{ex.cardioData?.duration?` — ${ex.cardioData.duration} min`:""}</span></span>
+                              ) : (
+                                <span><span style={{ fontWeight:700 }}>{ex.name}</span>{ex.sets.filter(s=>s.done&&s.weight&&s.reps).map((s,si) => (<span key={si} style={{ color:C.textLight }}> {s.weight}×{s.reps}</span>))}</span>
+                              )}
                             </div>
                           ))}
                           {w.type === "cardio" && (
