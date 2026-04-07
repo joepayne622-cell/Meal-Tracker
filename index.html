@@ -1032,6 +1032,10 @@
         if (!fitToken) { connectGoogleFit(); return; }
         setFitSyncing(true);
         console.log("Syncing challenge:", challengeId, "createdAt:", ch.createdAt, "userName:", userName);
+        // Find the exact player key in Firebase (handles case/space mismatches)
+        const existingPlayers = Object.keys(ch.players || {});
+        const matchedKey = existingPlayers.find(k => k.toLowerCase() === userName.toLowerCase()) || userName;
+        console.log("Using player key:", matchedKey, "existing players:", existingPlayers);
         try {
           const now = Date.now();
           const body = {
@@ -1072,7 +1076,7 @@
           });
           console.log("Total steps calculated:", totalSteps, "daily:", dailyBreakdown);
           // Always write — even if 0, overwrite any stale manual entry
-          const writeRef = "challenges/" + challengeId + "/players/" + userName;
+          const writeRef = "challenges/" + challengeId + "/players/" + matchedKey;
           console.log("Writing to Firebase:", writeRef, "progress:", totalSteps);
           await db.ref(writeRef).update({
             progress: totalSteps,
@@ -1080,6 +1084,22 @@
             lastSynced: Date.now(),
           });
           console.log("Firebase write complete");
+          // Also update local state immediately so UI reflects new value right away
+          setChallenges(prev => ({
+            ...prev,
+            [challengeId]: {
+              ...prev[challengeId],
+              players: {
+                ...prev[challengeId]?.players,
+                [matchedKey]: {
+                  ...prev[challengeId]?.players?.[matchedKey],
+                  progress: totalSteps,
+                  dailySteps: dailyBreakdown,
+                  lastSynced: Date.now(),
+                }
+              }
+            }
+          }));
           setFitSteps(totalSteps);
           showToast("Synced " + totalSteps.toLocaleString() + " steps! 🏃");
         } catch (e) {
