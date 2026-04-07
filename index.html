@@ -1028,17 +1028,55 @@
 
       const syncFitStepsToChallenge = async (challengeId) => {
         const ch = challenges[challengeId];
-        if (!ch || !fitToken) { if (!fitToken) { connectGoogleFit(); } return; }
+        if (!ch) { showToast("Challenge not found", "error"); return; }
+        if (!fitToken) { connectGoogleFit(); return; }
         setFitSyncing(true);
-        const result = await fetchFitSteps(fitToken, ch.createdAt);
-        if (!result || !result.total) { setFitSyncing(false); return; }
-        // Store total steps for the challenge period + daily breakdown
-        await db.ref("challenges/" + challengeId + "/players/" + userName).update({
-          progress: result.total,
-          dailySteps: result.daily,
-          lastSynced: Date.now(),
-        });
-        showToast("Synced " + result.total.toLocaleString() + " steps for challenge! 🏃");
+        try {
+          const now = Date.now();
+          const body = {
+            aggregateBy: [{ dataTypeName: "com.google.step_count.delta" }],
+            bucketByTime: { durationMillis: 86400000 },
+            startTimeMillis: ch.createdAt,
+            endTimeMillis: now,
+          };
+          const res = await fetch("https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate", {
+            method: "POST",
+            headers: { Authorization: "Bearer " + fitToken, "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          if (res.status === 401) {
+            disconnectGoogleFit();
+            showToast("Google Fit session expired — reconnect", "error");
+            setFitSyncing(false);
+            return;
+          }
+          const data = await res.json();
+          let totalSteps = 0;
+          const dailyBreakdown = {};
+          (data.bucket || []).forEach(b => {
+            const dayKey = new Date(parseInt(b.startTimeMillis)).toISOString().split("T")[0];
+            let daySteps = 0;
+            (b.dataset || []).forEach(ds => {
+              (ds.point || []).forEach(pt => {
+                (pt.value || []).forEach(v => { daySteps += (v.intVal || 0); });
+              });
+            });
+            if (daySteps > 0) {
+              dailyBreakdown[dayKey] = daySteps;
+              totalSteps += daySteps;
+            }
+          });
+          // Always write — even if 0, overwrite any stale manual entry
+          await db.ref("challenges/" + challengeId + "/players/" + userName).update({
+            progress: totalSteps,
+            dailySteps: dailyBreakdown,
+            lastSynced: Date.now(),
+          });
+          setFitSteps(totalSteps);
+          showToast("Synced " + totalSteps.toLocaleString() + " steps! 🏃");
+        } catch (e) {
+          showToast("Sync failed — try reconnecting Google Fit", "error");
+        }
         setFitSyncing(false);
       };
 
