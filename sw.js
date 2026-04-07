@@ -1,9 +1,7 @@
-const CACHE_NAME = "macro-tracker-v23";
+const CACHE_NAME = "macro-tracker-v24";
 
-// On install, skip waiting immediately
 self.addEventListener("install", () => self.skipWaiting());
 
-// On activate, clear ALL old caches and take control
 self.addEventListener("activate", (e) => {
   e.waitUntil(
     caches.keys().then((keys) =>
@@ -12,7 +10,6 @@ self.addEventListener("activate", (e) => {
   );
 });
 
-// Network-first: always try network, fall back to cache offline
 self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
   e.respondWith(
@@ -23,5 +20,18 @@ self.addEventListener("fetch", (e) => {
         return response;
       })
       .catch(() => caches.match(e.request))
+  );
+});
+
+// Handle notification clicks — open the app
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  e.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      if (clientList.length > 0) {
+        return clientList[0].focus();
+      }
+      return clients.openWindow("/");
+    })
   );
 });
