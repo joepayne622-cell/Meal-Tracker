@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="Macros" />
-  <meta name="theme-color" content="#4A90D9" />
+  <meta name="theme-color" content="#1f3a22" />
   <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
@@ -37,8 +37,8 @@
       font-size: 17px;
     }
     html, body {
-      background: #f4f6f9;
-      color: #1a1a2e;
+      background: #f4f7f2;
+      color: #1a2e1e;
       font-family: 'Nunito', 'Segoe UI', sans-serif;
       min-height: 100vh;
     }
@@ -46,9 +46,9 @@
     input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; }
     input[type="date"]::-webkit-calendar-picker-indicator { filter: none; opacity: 0.5; }
     ::-webkit-scrollbar { width: 4px; }
-    ::-webkit-scrollbar-track { background: #f4f6f9; }
-    ::-webkit-scrollbar-thumb { background: #d0d5e0; border-radius: 99px; }
-    input:focus { outline: none; border-color: #4A90D9 !important; box-shadow: 0 0 0 3px rgba(74,144,217,0.12); }
+    ::-webkit-scrollbar-track { background: #f4f7f2; }
+    ::-webkit-scrollbar-thumb { background: #c4d4c4; border-radius: 99px; }
+    input:focus { outline: none; border-color: #2e6b3a !important; box-shadow: 0 0 0 3px rgba(46,107,58,0.12); }
     button:active { transform: scale(0.97); }
     @keyframes slideDown { from { opacity:0; transform:translateY(-8px);} to { opacity:1; transform:translateY(0);} }
     @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
@@ -712,27 +712,27 @@
     const emptyGoals = { calories: 2000, protein: 150, carbs: 200, fat: 65 };
 
     const C = {
-      blue: "#4A90D9",
-      blueDark: "#2f6fab",
-      blueLight: "#e8f2fd",
-      green: "#34c97e",
-      greenLight: "#e6f9f0",
-      orange: "#f5a623",
-      orangeLight: "#fff3e0",
-      red: "#e8453c",
-      redLight: "#fdecea",
-      purple: "#9b6dff",
-      purpleLight: "#f0ebff",
-      bg: "#f4f6f9",
+      blue: "#2e6b3a",
+      blueDark: "#1f4a28",
+      blueLight: "#e8f3e8",
+      green: "#2e6b3a",
+      greenLight: "#e8f3e8",
+      orange: "#c9883a",
+      orangeLight: "#f5ede0",
+      red: "#b84040",
+      redLight: "#f5e8e8",
+      purple: "#5a6ab0",
+      purpleLight: "#eaecf8",
+      bg: "#f4f7f2",
       card: "#ffffff",
-      border: "#e8ecf2",
-      text: "#1a1a2e",
-      textMid: "#5a6482",
-      textLight: "#9aa3bc",
+      border: "#ddeadd",
+      text: "#1a2e1e",
+      textMid: "#4a6a50",
+      textLight: "#7a9a7e",
     };
 
     const inputStyle = {
-      width: "100%", background: "#f8fafc", border: `1.5px solid ${C.border}`,
+      width: "100%", background: "#f0f5f0", border: `1.5px solid ${C.border}`,
       borderRadius: 12, padding: "13px 16px", color: C.text,
       fontSize: 17, outline: "none", boxSizing: "border-box",
       fontFamily: "inherit", transition: "border-color 0.2s",
@@ -2852,7 +2852,7 @@
                                 value={newChallenge.customDuration}
                                 onChange={e => setNewChallenge(n => ({...n, customDuration:e.target.value}))}
                                 style={{...inputStyle, borderColor: newChallenge.customDuration ? C.blue : C.border,
-                                  boxShadow: newChallenge.customDuration ? `0 0 0 3px rgba(74,144,217,0.12)` : "none"}} />
+                                  boxShadow: newChallenge.customDuration ? `0 0 0 3px rgba(46,107,58,0.12)` : "none"}} />
                               {newChallenge.customDuration && (
                                 <div style={{position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", fontSize:13, color:C.blue, fontWeight:700}}>
                                   days
