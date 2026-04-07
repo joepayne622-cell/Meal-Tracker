@@ -13,6 +13,22 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyAdklGvqYBrCbhJnXO1QOSEDE1hakjuvnA",
+      authDomain: "macro-tracker-53023.firebaseapp.com",
+      databaseURL: "https://macro-tracker-53023-default-rtdb.firebaseio.com",
+      projectId: "macro-tracker-53023",
+      storageBucket: "macro-tracker-53023.firebasestorage.app",
+      messagingSenderId: "49697378116",
+      appId: "1:49697378116:web:dc90e7b3d69de27f899111"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+  </script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
@@ -37,7 +53,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect } = React;
+    const { useState, useEffect, useRef } = React;
     const STORAGE_KEY = "macro-tracker-data-v2";
 
     const PRESET_FOODS = [
@@ -771,6 +787,13 @@
 
     function App() {
       const [tab, setTab] = useState("dash");
+      const [userName, setUserName] = useState(() => localStorage.getItem("mt-username") || "");
+      const [challenges, setChallenges] = useState({});
+      const [activeChallengeId, setActiveChallengeId] = useState(null);
+      const [challengeTab, setChallengeTab] = useState("browse");
+      const [newChallenge, setNewChallenge] = useState({ type:"workout", goal:"", unit:"sessions", duration:7, name:"" });
+      const [joinCode, setJoinCode] = useState("");
+      const challengeListeners = useRef({});
       const [goals, setGoals] = useState(emptyGoals);
       const [entries, setEntries] = useState({});
       const [form, setForm] = useState({ name: "", calories: "", protein: "", carbs: "", fat: "", meal: "Breakfast", qty: 1 });
@@ -829,6 +852,89 @@
       useEffect(() => {
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ goals, entries, workouts, routines, weightLog, bodyWeightUnit })); } catch {}
       }, [goals, entries, workouts, routines, weightLog, bodyWeightUnit]);
+
+      // Load user's challenge IDs from localStorage and subscribe to each
+      useEffect(() => {
+        const ids = JSON.parse(localStorage.getItem("mt-challenge-ids") || "[]");
+        ids.forEach(id => subscribeToChallenge(id));
+        return () => Object.values(challengeListeners.current).forEach(u => u());
+      }, []);
+
+      const subscribeToChallenge = (id) => {
+        if (challengeListeners.current[id]) return;
+        const ref = db.ref("challenges/" + id);
+        const handler = ref.on("value", snap => {
+          const data = snap.val();
+          if (data) setChallenges(prev => ({ ...prev, [id]: data }));
+        });
+        challengeListeners.current[id] = () => ref.off("value", handler);
+      };
+
+      const saveUserName = (name) => {
+        setUserName(name);
+        localStorage.setItem("mt-username", name);
+      };
+
+      const generateCode = () => Math.random().toString(36).substr(2, 6).toUpperCase();
+
+      const createChallenge = async () => {
+        if (!userName || !newChallenge.goal || !newChallenge.name) return;
+        const id = generateCode();
+        const challenge = {
+          id, name: newChallenge.name,
+          type: newChallenge.type, goal: parseFloat(newChallenge.goal),
+          unit: newChallenge.unit, duration: newChallenge.duration,
+          createdAt: Date.now(),
+          endsAt: Date.now() + newChallenge.duration * 86400000,
+          players: {
+            [userName]: { name: userName, progress: 0, logs: {} }
+          }
+        };
+        await db.ref("challenges/" + id).set(challenge);
+        const ids = JSON.parse(localStorage.getItem("mt-challenge-ids") || "[]");
+        localStorage.setItem("mt-challenge-ids", JSON.stringify([...ids, id]));
+        subscribeToChallenge(id);
+        setActiveChallengeId(id);
+        setChallengeTab("browse");
+        setNewChallenge({ type:"workout", goal:"", unit:"sessions", duration:7, name:"" });
+        showToast("Challenge created! Code: " + id);
+      };
+
+      const joinChallenge = async () => {
+        const id = joinCode.trim().toUpperCase();
+        if (!id || !userName) return;
+        const snap = await db.ref("challenges/" + id).get();
+        if (!snap.exists()) { showToast("Challenge not found", "error"); return; }
+        await db.ref("challenges/" + id + "/players/" + userName).set({ name: userName, progress: 0, logs: {} });
+        const ids = JSON.parse(localStorage.getItem("mt-challenge-ids") || "[]");
+        if (!ids.includes(id)) localStorage.setItem("mt-challenge-ids", JSON.stringify([...ids, id]));
+        subscribeToChallenge(id);
+        setJoinCode("");
+        setChallengeTab("browse");
+        showToast("Joined challenge!");
+      };
+
+      const logChallengeProgress = async (challengeId, amount) => {
+        if (!userName) return;
+        const ch = challenges[challengeId];
+        if (!ch) return;
+        const player = ch.players?.[userName] || { name: userName, progress: 0, logs: {} };
+        const newProgress = (player.progress || 0) + amount;
+        const logKey = Date.now();
+        await db.ref("challenges/" + challengeId + "/players/" + userName).update({
+          progress: newProgress,
+          ["logs/" + logKey]: { amount, at: Date.now() }
+        });
+        showToast("Progress logged! 🏆");
+      };
+
+      const leaveChallenge = async (id) => {
+        if (challengeListeners.current[id]) { challengeListeners.current[id](); delete challengeListeners.current[id]; }
+        setChallenges(prev => { const n = {...prev}; delete n[id]; return n; });
+        const ids = JSON.parse(localStorage.getItem("mt-challenge-ids") || "[]");
+        localStorage.setItem("mt-challenge-ids", JSON.stringify(ids.filter(i => i !== id)));
+        if (activeChallengeId === id) setActiveChallengeId(null);
+      };
 
       const showToast = (msg, type="success") => {
         setToast({ msg, type });
@@ -957,7 +1063,7 @@
 
           {/* Tab bar */}
           <div style={{ background: C.card, borderBottom: `1px solid ${C.border}`, display: "flex", padding: "0 4px" }}>
-            {[["dash", "🏠", "Home"], ["log", "📋", "Log"], ["add", "➕", "Add"], ["workout", "💪", "Train"], ["goals", "🎯", "Goals"]].map(([t, icon, label]) => (
+            {[["dash", "🏠", "Home"], ["log", "📋", "Log"], ["add", "➕", "Add"], ["workout", "💪", "Train"], ["challenge", "🏆", "Compete"], ["goals", "🎯", "Goals"]].map(([t, icon, label]) => (
               <button key={t} onClick={() => setTab(t)} style={{
                 flex: 1, padding: "11px 2px", background: "none", border: "none",
                 borderBottom: tab === t ? `3px solid ${C.blue}` : "3px solid transparent",
@@ -2039,6 +2145,277 @@
               );
             })()}
 
+
+            {/* CHALLENGES TAB */}
+            {tab === "challenge" && (() => {
+              const myChallenges = Object.values(challenges);
+              const now = Date.now();
+              const TYPES = [
+                { id:"workout", label:"Workout Sessions", icon:"🏋️", units:["sessions"] },
+                { id:"running", label:"Running Distance", icon:"🏃", units:["miles","km"] },
+                { id:"steps",   label:"Step Count",       icon:"👟", units:["steps"] },
+              ];
+
+              // Username gate
+              if (!userName) return (
+                <div style={{animation:"fadeIn 0.2s ease", textAlign:"center", padding:"40px 20px"}}>
+                  <div style={{fontSize:52, marginBottom:16}}>🏆</div>
+                  <div style={{fontSize:20, fontWeight:900, color:C.text, marginBottom:8}}>Head-to-Head Challenges</div>
+                  <div style={{fontSize:14, color:C.textLight, marginBottom:28}}>Set a display name to get started</div>
+                  <input placeholder="Your name (e.g. JP)" id="unameInput"
+                    style={{...inputStyle, marginBottom:12, textAlign:"center", fontSize:16, fontWeight:700}}
+                    onKeyDown={e => { if (e.key==="Enter" && e.target.value.trim()) saveUserName(e.target.value.trim()); }} />
+                  <button onClick={() => { const v=document.getElementById("unameInput").value.trim(); if(v) saveUserName(v); }}
+                    style={{width:"100%", padding:"14px", borderRadius:14, border:"none", background:C.blue, color:"#fff", fontWeight:800, fontSize:16, cursor:"pointer", fontFamily:"inherit"}}>
+                    Let's Go →
+                  </button>
+                </div>
+              );
+
+              return (
+                <div style={{animation:"fadeIn 0.2s ease"}}>
+                  {/* Sub-tabs */}
+                  <div style={{display:"flex", background:C.border, borderRadius:12, padding:3, marginBottom:16}}>
+                    {[["browse","🏆 My Challenges"],["create","➕ Create"],["join","🔗 Join"]].map(([t,label]) => (
+                      <button key={t} onClick={() => setChallengeTab(t)}
+                        style={{flex:1, padding:"8px 4px", borderRadius:10, fontSize:11, fontWeight:800, border:"none", cursor:"pointer", fontFamily:"inherit",
+                          background:challengeTab===t?C.card:"transparent", color:challengeTab===t?C.blue:C.textLight,
+                          boxShadow:challengeTab===t?"0 2px 8px rgba(0,0,0,0.1)":"none"}}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* BROWSE */}
+                  {challengeTab === "browse" && (
+                    <div>
+                      <div style={{fontSize:12, color:C.textLight, fontWeight:700, marginBottom:14}}>
+                        Playing as <span style={{color:C.blue, fontWeight:800}}>{userName}</span>
+                        <button onClick={() => saveUserName("")} style={{marginLeft:8, fontSize:11, color:C.textLight, background:"none", border:"none", cursor:"pointer", fontFamily:"inherit", textDecoration:"underline"}}>change</button>
+                      </div>
+                      {myChallenges.length === 0 ? (
+                        <div style={{textAlign:"center", padding:"40px 20px", color:C.textLight}}>
+                          <div style={{fontSize:48, marginBottom:12}}>🥊</div>
+                          <div style={{fontSize:16, fontWeight:800, color:C.textMid, marginBottom:8}}>No active challenges</div>
+                          <div style={{fontSize:13, marginBottom:24}}>Create one or join with a code</div>
+                          <div style={{display:"flex", gap:8}}>
+                            <button onClick={() => setChallengeTab("create")} style={{flex:1, padding:"12px", borderRadius:12, border:"none", background:C.blue, color:"#fff", fontWeight:800, fontSize:14, cursor:"pointer", fontFamily:"inherit"}}>Create</button>
+                            <button onClick={() => setChallengeTab("join")} style={{flex:1, padding:"12px", borderRadius:12, border:`1.5px solid ${C.border}`, background:C.card, color:C.textMid, fontWeight:800, fontSize:14, cursor:"pointer", fontFamily:"inherit"}}>Join</button>
+                          </div>
+                        </div>
+                      ) : myChallenges.map(ch => {
+                        const players = Object.values(ch.players || {}).sort((a,b) => (b.progress||0)-(a.progress||0));
+                        const me = ch.players?.[userName];
+                        const myProgress = me?.progress || 0;
+                        const opponent = players.find(p => p.name !== userName);
+                        const oppProgress = opponent?.progress || 0;
+                        const pct = Math.min((myProgress / ch.goal) * 100, 100);
+                        const oppPct = Math.min((oppProgress / ch.goal) * 100, 100);
+                        const daysLeft = Math.max(0, Math.ceil((ch.endsAt - now) / 86400000));
+                        const ended = now > ch.endsAt;
+                        const typeInfo = TYPES.find(t => t.id === ch.type) || TYPES[0];
+                        const winner = ended ? (myProgress >= oppProgress ? (myProgress > oppProgress ? "you" : "tie") : "them") : null;
+                        return (
+                          <div key={ch.id} style={{background:C.card, borderRadius:16, border:`1px solid ${C.border}`, padding:16, marginBottom:14, boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
+                            {/* Header */}
+                            <div style={{display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:12}}>
+                              <div>
+                                <div style={{fontSize:16, fontWeight:900, color:C.text}}>{typeInfo.icon} {ch.name}</div>
+                                <div style={{fontSize:12, color:C.textLight, fontWeight:600, marginTop:2}}>
+                                  Goal: {ch.goal} {ch.unit} · {ended ? "Ended" : daysLeft+" days left"} · Code: <span style={{fontWeight:800, color:C.blue, letterSpacing:1}}>{ch.id}</span>
+                                </div>
+                              </div>
+                              {ended && winner && (
+                                <div style={{fontSize:11, fontWeight:800, padding:"4px 10px", borderRadius:99,
+                                  background: winner==="you" ? C.green : winner==="tie" ? C.orange : C.red,
+                                  color:"#fff"}}>
+                                  {winner==="you" ? "🏆 Won!" : winner==="tie" ? "🤝 Tie" : "😤 Lost"}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* VS bars */}
+                            <div style={{marginBottom:14}}>
+                              {/* Me */}
+                              <div style={{marginBottom:8}}>
+                                <div style={{display:"flex", justifyContent:"space-between", marginBottom:4}}>
+                                  <span style={{fontSize:13, fontWeight:800, color:C.blue}}>{userName} (you)</span>
+                                  <span style={{fontSize:13, fontWeight:800, color:C.blue}}>{myProgress} / {ch.goal} {ch.unit}</span>
+                                </div>
+                                <div style={{height:10, background:C.border, borderRadius:99, overflow:"hidden"}}>
+                                  <div style={{height:"100%", width:`${pct}%`, background:C.blue, borderRadius:99, transition:"width 0.5s ease"}} />
+                                </div>
+                              </div>
+                              {/* VS divider */}
+                              <div style={{textAlign:"center", fontSize:11, fontWeight:800, color:C.textLight, marginBottom:8}}>VS</div>
+                              {/* Opponent */}
+                              {opponent ? (
+                                <div>
+                                  <div style={{display:"flex", justifyContent:"space-between", marginBottom:4}}>
+                                    <span style={{fontSize:13, fontWeight:800, color:C.orange}}>{opponent.name}</span>
+                                    <span style={{fontSize:13, fontWeight:800, color:C.orange}}>{oppProgress} / {ch.goal} {ch.unit}</span>
+                                  </div>
+                                  <div style={{height:10, background:C.border, borderRadius:99, overflow:"hidden"}}>
+                                    <div style={{height:"100%", width:`${oppPct}%`, background:C.orange, borderRadius:99, transition:"width 0.5s ease"}} />
+                                  </div>
+                                </div>
+                              ) : (
+                                <div style={{textAlign:"center", padding:"10px", background:C.bg, borderRadius:10, fontSize:12, color:C.textLight}}>
+                                  Waiting for opponent · Share code <span style={{fontWeight:800, color:C.blue}}>{ch.id}</span>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Log Progress */}
+                            {!ended && (
+                              <div>
+                                <div style={{fontSize:12, fontWeight:800, color:C.textMid, marginBottom:8}}>Log Progress</div>
+                                <div style={{display:"flex", gap:8}}>
+                                  {ch.type === "workout" && (
+                                    <button onClick={() => logChallengeProgress(ch.id, 1)}
+                                      style={{flex:1, padding:"11px", borderRadius:12, border:"none", background:C.blue, color:"#fff", fontWeight:800, fontSize:13, cursor:"pointer", fontFamily:"inherit"}}>
+                                      + 1 Workout Session
+                                    </button>
+                                  )}
+                                  {ch.type === "running" && (() => {
+                                    const rKey = "run-"+ch.id;
+                                    return (
+                                      <div style={{display:"flex", gap:8, flex:1}}>
+                                        <input type="number" placeholder={"Miles run"} id={rKey}
+                                          style={{...inputStyle, flex:1, padding:"10px 12px"}} />
+                                        <button onClick={() => { const v=parseFloat(document.getElementById(rKey)?.value||0); if(v>0){logChallengeProgress(ch.id,v);document.getElementById(rKey).value="";} }}
+                                          style={{padding:"11px 16px", borderRadius:12, border:"none", background:C.green, color:"#fff", fontWeight:800, fontSize:13, cursor:"pointer", fontFamily:"inherit"}}>
+                                          Log
+                                        </button>
+                                      </div>
+                                    );
+                                  })()}
+                                  {ch.type === "steps" && (() => {
+                                    const sKey = "steps-"+ch.id;
+                                    return (
+                                      <div style={{display:"flex", gap:8, flex:1}}>
+                                        <input type="number" placeholder="Steps" id={sKey}
+                                          style={{...inputStyle, flex:1, padding:"10px 12px"}} />
+                                        <button onClick={() => { const v=parseFloat(document.getElementById(sKey)?.value||0); if(v>0){logChallengeProgress(ch.id,v);document.getElementById(sKey).value="";} }}
+                                          style={{padding:"11px 16px", borderRadius:12, border:"none", background:C.purple, color:"#fff", fontWeight:800, fontSize:13, cursor:"pointer", fontFamily:"inherit"}}>
+                                          Log
+                                        </button>
+                                      </div>
+                                    );
+                                  })()}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Leave */}
+                            <button onClick={() => leaveChallenge(ch.id)}
+                              style={{width:"100%", marginTop:10, padding:"8px", borderRadius:10, border:`1px solid ${C.border}`, background:"transparent", color:C.textLight, fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit"}}>
+                              Leave Challenge
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* CREATE */}
+                  {challengeTab === "create" && (
+                    <div>
+                      <div style={{background:C.card, borderRadius:16, border:`1px solid ${C.border}`, padding:16}}>
+                        <div style={{fontSize:15, fontWeight:800, color:C.text, marginBottom:16}}>Create a Challenge</div>
+
+                        <label style={{fontSize:12, color:C.textMid, fontWeight:700, display:"block", marginBottom:6}}>Challenge Name</label>
+                        <input placeholder="e.g. Week 1 Grind" value={newChallenge.name}
+                          onChange={e => setNewChallenge(n => ({...n, name:e.target.value}))}
+                          style={{...inputStyle, marginBottom:14}} />
+
+                        <label style={{fontSize:12, color:C.textMid, fontWeight:700, display:"block", marginBottom:8}}>Type</label>
+                        <div style={{display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:14}}>
+                          {TYPES.map(t => (
+                            <button key={t.id} onClick={() => setNewChallenge(n => ({...n, type:t.id, unit:t.units[0]}))}
+                              style={{padding:"12px 6px", borderRadius:12, border:newChallenge.type===t.id?`2px solid ${C.blue}`:`2px solid ${C.border}`,
+                                background:newChallenge.type===t.id?C.blueLight:C.bg, color:newChallenge.type===t.id?C.blue:C.textMid,
+                                fontWeight:700, fontSize:11, cursor:"pointer", fontFamily:"inherit", display:"flex", flexDirection:"column", alignItems:"center", gap:4}}>
+                              <span style={{fontSize:20}}>{t.icon}</span>{t.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:14}}>
+                          <div>
+                            <label style={{fontSize:12, color:C.textMid, fontWeight:700, display:"block", marginBottom:6}}>
+                              Goal ({newChallenge.unit})
+                            </label>
+                            <input type="number" placeholder={newChallenge.type==="steps"?"50000":newChallenge.type==="running"?"20":"5"}
+                              value={newChallenge.goal} onChange={e => setNewChallenge(n => ({...n, goal:e.target.value}))}
+                              style={{...inputStyle}} />
+                          </div>
+                          <div>
+                            <label style={{fontSize:12, color:C.textMid, fontWeight:700, display:"block", marginBottom:6}}>Duration</label>
+                            <div style={{display:"flex", gap:4}}>
+                              {[3,7,14,30].map(d => (
+                                <button key={d} onClick={() => setNewChallenge(n => ({...n, duration:d}))}
+                                  style={{flex:1, padding:"10px 2px", borderRadius:10, border:newChallenge.duration===d?`2px solid ${C.blue}`:`1.5px solid ${C.border}`,
+                                    background:newChallenge.duration===d?C.blueLight:C.bg, color:newChallenge.duration===d?C.blue:C.textMid,
+                                    fontWeight:700, fontSize:11, cursor:"pointer", fontFamily:"inherit"}}>
+                                  {d}d
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {newChallenge.type !== "workout" && TYPES.find(t=>t.id===newChallenge.type)?.units.length > 1 && (
+                          <div style={{marginBottom:14}}>
+                            <label style={{fontSize:12, color:C.textMid, fontWeight:700, display:"block", marginBottom:6}}>Unit</label>
+                            <div style={{display:"flex", gap:8}}>
+                              {TYPES.find(t=>t.id===newChallenge.type).units.map(u => (
+                                <button key={u} onClick={() => setNewChallenge(n => ({...n, unit:u}))}
+                                  style={{padding:"8px 16px", borderRadius:99, border:newChallenge.unit===u?`2px solid ${C.blue}`:`2px solid ${C.border}`,
+                                    background:newChallenge.unit===u?C.blueLight:C.bg, color:newChallenge.unit===u?C.blue:C.textMid,
+                                    fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit"}}>
+                                  {u}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        <div style={{background:C.blueLight, borderRadius:12, padding:12, marginBottom:16, fontSize:12, color:C.blue, fontWeight:700}}>
+                          📋 After creating, share the 6-letter code with your opponent so they can join
+                        </div>
+
+                        <button onClick={createChallenge}
+                          style={{width:"100%", padding:"14px", borderRadius:14, border:"none", background:newChallenge.name&&newChallenge.goal?C.blue:C.border,
+                            color:newChallenge.name&&newChallenge.goal?"#fff":C.textLight, fontWeight:800, fontSize:16, cursor:"pointer", fontFamily:"inherit"}}>
+                          Create Challenge 🚀
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* JOIN */}
+                  {challengeTab === "join" && (
+                    <div style={{background:C.card, borderRadius:16, border:`1px solid ${C.border}`, padding:16}}>
+                      <div style={{fontSize:15, fontWeight:800, color:C.text, marginBottom:8}}>Join a Challenge</div>
+                      <div style={{fontSize:13, color:C.textLight, marginBottom:20}}>Enter the 6-letter code your friend shared with you</div>
+                      <label style={{fontSize:12, color:C.textMid, fontWeight:700, display:"block", marginBottom:6}}>Challenge Code</label>
+                      <input placeholder="e.g. AB1C2D" value={joinCode}
+                        onChange={e => setJoinCode(e.target.value.toUpperCase())}
+                        style={{...inputStyle, fontSize:20, fontWeight:900, letterSpacing:4, textAlign:"center", marginBottom:16}}
+                        maxLength={6} />
+                      <button onClick={joinChallenge}
+                        style={{width:"100%", padding:"14px", borderRadius:14, border:"none",
+                          background:joinCode.length===6&&userName?C.blue:C.border,
+                          color:joinCode.length===6&&userName?"#fff":C.textLight,
+                          fontWeight:800, fontSize:16, cursor:"pointer", fontFamily:"inherit"}}>
+                        Join Challenge 🏆
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {tab === "goals" && (
               <div style={{ animation: "fadeIn 0.2s ease" }}>
