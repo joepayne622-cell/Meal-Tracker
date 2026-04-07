@@ -1280,26 +1280,23 @@
         if (!ch) { showToast("Challenge not found", "error"); return; }
         if (!fitToken) { connectGoogleFit(); return; }
         setFitSyncing(true);
-        console.log("Syncing challenge:", challengeId, "createdAt:", ch.createdAt, "userName:", userName);
-        // Find the exact player key in Firebase (handles case/space mismatches)
-        const existingPlayers = Object.keys(ch.players || {});
-        const matchedKey = existingPlayers.find(k => k.toLowerCase() === userName.toLowerCase()) || userName;
-        console.log("Using player key:", matchedKey, "existing players:", existingPlayers);
         try {
           const now = Date.now();
+          // Start from midnight on the day the challenge was created
+          const challengeDate = new Date(ch.createdAt);
+          challengeDate.setHours(0, 0, 0, 0);
+          const startMs = challengeDate.getTime();
           const body = {
             aggregateBy: [{ dataTypeName: "com.google.step_count.delta" }],
             bucketByTime: { durationMillis: 86400000 },
-            startTimeMillis: ch.createdAt,
+            startTimeMillis: startMs,
             endTimeMillis: now,
           };
-          console.log("Fetching Fit data from", new Date(ch.createdAt).toLocaleDateString(), "to now");
           const res = await fetch("https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate", {
             method: "POST",
             headers: { Authorization: "Bearer " + fitToken, "Content-Type": "application/json" },
             body: JSON.stringify(body),
           });
-          console.log("Fit API status:", res.status);
           if (res.status === 401) {
             disconnectGoogleFit();
             showToast("Google Fit session expired — reconnect", "error");
@@ -1307,7 +1304,6 @@
             return;
           }
           const data = await res.json();
-          console.log("Fit API response:", JSON.stringify(data).slice(0, 500));
           let totalSteps = 0;
           const dailyBreakdown = {};
           (data.bucket || []).forEach(b => {
@@ -1318,22 +1314,18 @@
                 (pt.value || []).forEach(v => { daySteps += (v.intVal || 0); });
               });
             });
-            if (daySteps > 0) {
-              dailyBreakdown[dayKey] = daySteps;
-              totalSteps += daySteps;
-            }
+            if (daySteps > 0) { dailyBreakdown[dayKey] = daySteps; totalSteps += daySteps; }
           });
-          console.log("Total steps calculated:", totalSteps, "daily:", dailyBreakdown);
+          // Match player key regardless of case
+          const existingPlayers = Object.keys(ch.players || {});
+          const matchedKey = existingPlayers.find(k => k.toLowerCase() === userName.toLowerCase()) || userName;
           const writeRef = "challenges/" + challengeId + "/players/" + matchedKey;
-          console.log("Writing to Firebase:", writeRef, "progress:", totalSteps);
-          // Write each field separately for reliability
           await db.ref(writeRef + "/progress").set(totalSteps);
           await db.ref(writeRef + "/lastSynced").set(Date.now());
+          await db.ref(writeRef + "/name").set(matchedKey);
           if (Object.keys(dailyBreakdown).length > 0) {
             await db.ref(writeRef + "/dailySteps").set(dailyBreakdown);
           }
-          console.log("Firebase write complete");
-          // Also update local state immediately so UI reflects new value right away
           setChallenges(prev => ({
             ...prev,
             [challengeId]: {
@@ -1342,18 +1334,19 @@
                 ...prev[challengeId]?.players,
                 [matchedKey]: {
                   ...prev[challengeId]?.players?.[matchedKey],
-                  progress: totalSteps,
-                  dailySteps: dailyBreakdown,
-                  lastSynced: Date.now(),
+                  progress: totalSteps, dailySteps: dailyBreakdown, lastSynced: Date.now(),
                 }
               }
             }
           }));
           setFitSteps(totalSteps);
-          showToast("Synced " + totalSteps.toLocaleString() + " steps! 🏃");
+          if (totalSteps === 0) {
+            showToast("Google Fit returned 0 steps — Garmin may not have synced yet. Check Google Fit app.", "error");
+          } else {
+            showToast("Synced " + totalSteps.toLocaleString() + " steps! 🏃");
+          }
         } catch (e) {
-          console.error("Sync error:", e);
-          showToast("Sync failed — try reconnecting Google Fit", "error");
+          showToast("Sync failed — try reconnecting", "error");
         }
         setFitSyncing(false);
       };
