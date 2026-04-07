@@ -1075,14 +1075,14 @@
             }
           });
           console.log("Total steps calculated:", totalSteps, "daily:", dailyBreakdown);
-          // Always write — even if 0, overwrite any stale manual entry
           const writeRef = "challenges/" + challengeId + "/players/" + matchedKey;
           console.log("Writing to Firebase:", writeRef, "progress:", totalSteps);
-          await db.ref(writeRef).update({
-            progress: totalSteps,
-            dailySteps: dailyBreakdown,
-            lastSynced: Date.now(),
-          });
+          // Write each field separately for reliability
+          await db.ref(writeRef + "/progress").set(totalSteps);
+          await db.ref(writeRef + "/lastSynced").set(Date.now());
+          if (Object.keys(dailyBreakdown).length > 0) {
+            await db.ref(writeRef + "/dailySteps").set(dailyBreakdown);
+          }
           console.log("Firebase write complete");
           // Also update local state immediately so UI reflects new value right away
           setChallenges(prev => ({
@@ -1308,6 +1308,45 @@
                       </button>
                     ))}
                   </div>
+
+                  {/* Step Counter Card */}
+                  {fitConnected && (
+                    <div style={{ background: C.card, borderRadius: 16, border: `1px solid ${C.border}`, padding: 16, marginBottom: 14, boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: C.text }}>👟 Steps Today</div>
+                        <button onClick={() => fetchFitSteps()}
+                          style={{ padding: "6px 14px", borderRadius: 10, border: "none", background: fitSyncing ? C.border : C.green, color: "#fff", fontWeight: 800, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+                          {fitSyncing ? "..." : "↻ Sync"}
+                        </button>
+                      </div>
+                      {fitSteps !== null ? (
+                        <div>
+                          <div style={{ fontSize: 42, fontWeight: 900, color: C.green, lineHeight: 1 }}>
+                            {fitSteps.toLocaleString()}
+                          </div>
+                          <div style={{ fontSize: 13, color: C.textLight, fontWeight: 600, marginTop: 4 }}>steps from Garmin today</div>
+                          {/* Step goal bar - 10k default */}
+                          <div style={{ marginTop: 10 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                              <span style={{ fontSize: 12, color: C.textLight, fontWeight: 700 }}>Daily goal</span>
+                              <span style={{ fontSize: 12, fontWeight: 800, color: fitSteps >= 10000 ? C.green : C.textMid }}>{Math.min(Math.round((fitSteps/10000)*100), 100)}%</span>
+                            </div>
+                            <div style={{ height: 7, background: C.border, borderRadius: 99, overflow: "hidden" }}>
+                              <div style={{ height: "100%", width: `${Math.min((fitSteps/10000)*100, 100)}%`, background: fitSteps >= 10000 ? C.green : C.blue, borderRadius: 99, transition: "width 0.5s ease" }} />
+                            </div>
+                            <div style={{ fontSize: 11, color: C.textLight, marginTop: 3 }}>{fitSteps >= 10000 ? "🎉 Goal reached!" : `${(10000 - fitSteps).toLocaleString()} steps to 10k`}</div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ textAlign: "center", padding: "10px 0" }}>
+                          <div style={{ fontSize: 14, color: C.textLight, marginBottom: 8 }}>Tap sync to load today's steps</div>
+                          <button onClick={() => fetchFitSteps()} style={{ padding: "10px 20px", borderRadius: 12, border: "none", background: C.green, color: "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>
+                            Load Steps
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Weight Tracker Card */}
                   <div style={{ background: C.card, borderRadius: 16, border: `1px solid ${C.border}`, padding: 16, marginBottom: 14, boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
