@@ -1117,53 +1117,6 @@
         } catch(e) { setFitSyncing(false); return 0; }
       };
 
-      const fetchFitSteps = async (token, challengeStartMs) => {
-        const t = token || fitToken;
-        if (!t) return 0;
-        setFitSyncing(true);
-        try {
-          const now = Date.now();
-          // If fetching for a challenge, start from challenge start; otherwise start of today
-          const startMs = challengeStartMs || (() => { const d = new Date(); d.setHours(0,0,0,0); return d.getTime(); })();
-          const body = {
-            aggregateBy: [{ dataTypeName: "com.google.step_count.delta" }],
-            bucketByTime: { durationMillis: 86400000 },
-            startTimeMillis: startMs,
-            endTimeMillis: now,
-          };
-          const res = await fetch("https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate", {
-            method: "POST",
-            headers: { Authorization: "Bearer " + t, "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          });
-          if (res.status === 401) { disconnectGoogleFit(); showToast("Google Fit session expired — reconnect", "error"); return 0; }
-          const data = await res.json();
-          let totalSteps = 0;
-          const dailyBreakdown = {};
-          (data.bucket || []).forEach(b => {
-            const dayKey = new Date(parseInt(b.startTimeMillis)).toISOString().split("T")[0];
-            let daySteps = 0;
-            (b.dataset || []).forEach(ds => {
-              (ds.point || []).forEach(pt => {
-                (pt.value || []).forEach(v => { daySteps += (v.intVal || 0); });
-              });
-            });
-            if (daySteps > 0) {
-              dailyBreakdown[dayKey] = daySteps;
-              totalSteps += daySteps;
-            }
-          });
-          setFitSteps(totalSteps);
-          setFitSyncing(false);
-          if (!challengeStartMs) showToast("Steps synced: " + totalSteps.toLocaleString() + " today");
-          return { total: totalSteps, daily: dailyBreakdown };
-        } catch (e) {
-          showToast("Sync failed — check connection", "error");
-          setFitSyncing(false);
-          return 0;
-        }
-      };
-
       const syncFitStepsToChallenge = async (challengeId) => {
         const ch = challenges[challengeId];
         if (!ch) { showToast("Challenge not found", "error"); return; }
