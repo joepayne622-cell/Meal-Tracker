@@ -2300,14 +2300,21 @@
             {/* LOG TAB */}
             {tab === "log" && (
               <div style={{ animation: "fadeIn 0.2s ease" }}>
+                {/* Header with + button */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: C.text }}>
+                    {dayEntries.length > 0 ? `${dayEntries.length} item${dayEntries.length!==1?"s":""} · ${Math.round(totals.calories)} cal` : "Nothing logged yet"}
+                  </div>
+                  <button onClick={() => setTab("add")} style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 16px", borderRadius: 12, border: "none", background: C.blue, color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+                    <span style={{ fontSize: 16 }}>➕</span> Add Food
+                  </button>
+                </div>
+
                 {dayEntries.length === 0 ? (
                   <div style={{ textAlign: "center", padding: "60px 20px", color: C.textLight }}>
                     <div style={{ fontSize: 56, marginBottom: 14 }}>🥗</div>
                     <div style={{ fontSize: 18, fontWeight: 800, color: C.textMid, marginBottom: 6 }}>Nothing logged yet</div>
-                    <div style={{ fontSize: 14, color: C.textLight, marginBottom: 24 }}>Tap the + Add tab to log your first meal</div>
-                    <button onClick={() => setTab("add")} style={{ background: C.blue, color: "#fff", border: "none", borderRadius: 12, padding: "12px 28px", fontWeight: 800, fontSize: 15, cursor: "pointer", fontFamily: "inherit" }}>
-                      + Add Food
-                    </button>
+                    <div style={{ fontSize: 14, color: C.textLight, marginBottom: 24 }}>Tap Add Food to log your first meal</div>
                   </div>
                 ) : (
                   <>
@@ -2359,6 +2366,14 @@
             {/* ADD TAB */}
             {tab === "add" && (
               <div style={{ animation: "fadeIn 0.2s ease" }}>
+
+                {/* Back to log header */}
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+                  <button onClick={() => setTab("log")} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.textMid, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+                    ← Back
+                  </button>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: C.text }}>Add Food</div>
+                </div>
 
                 {/* Search */}
                 <div style={{ position: "relative", marginBottom: 14 }}>
