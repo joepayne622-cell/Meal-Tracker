@@ -16,6 +16,7 @@
   <!-- Firebase -->
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script>
     const firebaseConfig = {
       apiKey: "AIzaSyAdklGvqYBrCbhJnXO1QOSEDE1hakjuvnA",
@@ -28,6 +29,7 @@
     };
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
+    const auth = firebase.auth();
   </script>
   <!-- Google Identity Services for Fit OAuth -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -792,13 +794,15 @@
 
     function App() {
       const [tab, setTab] = useState("dash");
-      const [userName, setUserName] = useState(() => localStorage.getItem("mt-username") || "");
+      const [googleUser, setGoogleUser] = useState(null);
+      const [authLoading, setAuthLoading] = useState(true);
       const [challenges, setChallenges] = useState({});
-      const [activeChallengeId, setActiveChallengeId] = useState(null);
       const [challengeTab, setChallengeTab] = useState("browse");
       const [newChallenge, setNewChallenge] = useState({ type:"workout", goal:"", unit:"sessions", duration:7, customDuration:"", name:"" });
-      const [joinCode, setJoinCode] = useState("");
+      const [inviteEmail, setInviteEmail] = useState("");
       const challengeListeners = useRef({});
+      const [garminActivities, setGarminActivities] = useState([]);
+      const [activitiesSyncing, setActivitiesSyncing] = useState(false);
       const [fitConnected, setFitConnected] = useState(() => !!localStorage.getItem("mt-fit-token"));
       const [fitToken, setFitToken] = useState(() => localStorage.getItem("mt-fit-token") || "");
       const [fitSteps, setFitSteps] = useState(null);
@@ -1024,6 +1028,56 @@
         });
       }, [challenges]);
 
+      // ── FIREBASE AUTH ────────────────────────────────────────────────────────
+      useEffect(() => {
+        const unsubscribe = auth.onAuthStateChanged(user => {
+          setGoogleUser(user);
+          setAuthLoading(false);
+          if (user) {
+            // Subscribe to all challenges where this user is a player
+            const uid = user.uid;
+            const ref = db.ref("userChallenges/" + uid);
+            ref.on("value", snap => {
+              const ids = snap.val() ? Object.keys(snap.val()) : [];
+              ids.forEach(id => subscribeToChallenge(id));
+            });
+          }
+        });
+        return () => unsubscribe();
+      }, []);
+
+      const signInWithGoogle = async () => {
+        try {
+          const provider = new firebase.auth.GoogleAuthProvider();
+          provider.addScope("https://www.googleapis.com/auth/fitness.activity.read");
+          provider.addScope("https://www.googleapis.com/auth/fitness.sleep.read");
+          provider.addScope("https://www.googleapis.com/auth/fitness.heart_rate.read");
+          provider.addScope("https://www.googleapis.com/auth/fitness.body.read");
+          provider.addScope("https://www.googleapis.com/auth/fitness.location.read");
+          const result = await auth.signInWithPopup(provider);
+          const token = result.credential?.accessToken;
+          if (token) {
+            setFitToken(token);
+            setFitConnected(true);
+            localStorage.setItem("mt-fit-token", token);
+            showToast("Signed in as " + result.user.displayName + " 👋");
+            fetchAllFitData(token);
+          }
+        } catch(e) {
+          showToast("Sign in failed — try again", "error");
+        }
+      };
+
+      const signOut = async () => {
+        await auth.signOut();
+        setGoogleUser(null);
+        disconnectGoogleFit();
+        setChallenges({});
+        Object.values(challengeListeners.current).forEach(u => u());
+        challengeListeners.current = {};
+        showToast("Signed out");
+      };
+
       // Load user's challenge IDs from localStorage and subscribe to each
       useEffect(() => {
         const ids = JSON.parse(localStorage.getItem("mt-challenge-ids") || "[]");
@@ -1041,66 +1095,71 @@
         challengeListeners.current[id] = () => ref.off("value", handler);
       };
 
-      const saveUserName = (name) => {
-        setUserName(name);
-        localStorage.setItem("mt-username", name);
-      };
-
-      const generateCode = () => Math.random().toString(36).substr(2, 6).toUpperCase();
+      const userName = googleUser?.displayName || googleUser?.email?.split("@")[0] || "";
+      const userEmail = googleUser?.email || "";
+      const userPhoto = googleUser?.photoURL || "";
+      const userId = googleUser?.uid || "";
 
       const createChallenge = async () => {
-        if (!userName || !newChallenge.name) return;
-        // Steps challenges don't need a goal — most steps wins
+        if (!googleUser || !newChallenge.name) return;
         if (newChallenge.type !== "steps" && !newChallenge.goal) return;
         const finalDuration = newChallenge.customDuration ? parseInt(newChallenge.customDuration) : newChallenge.duration;
         if (!finalDuration || finalDuration < 1) return;
-        const id = generateCode();
+        const id = Math.random().toString(36).substr(2, 8).toUpperCase();
+        const playerKey = userId;
         const challenge = {
           id, name: newChallenge.name,
           type: newChallenge.type,
-          goal: newChallenge.type === "steps" ? 0 : parseFloat(newChallenge.goal),  // 0 = most wins
+          goal: newChallenge.type === "steps" ? 0 : parseFloat(newChallenge.goal),
           unit: newChallenge.unit, duration: finalDuration,
-          mostWins: newChallenge.type === "steps",  // flag: highest total wins
+          mostWins: newChallenge.type === "steps",
           createdAt: Date.now(),
           endsAt: Date.now() + finalDuration * 86400000,
+          createdBy: userId,
           players: {
-            [userName]: { name: userName, progress: 0, logs: {}, dailySteps: {} }
+            [playerKey]: { name: userName, email: userEmail, photo: userPhoto, uid: userId, progress: 0, dailySteps: {} }
           }
         };
         await db.ref("challenges/" + id).set(challenge);
-        const ids = JSON.parse(localStorage.getItem("mt-challenge-ids") || "[]");
-        localStorage.setItem("mt-challenge-ids", JSON.stringify([...ids, id]));
+        await db.ref("userChallenges/" + userId + "/" + id).set(true);
         subscribeToChallenge(id);
-        setActiveChallengeId(id);
         setChallengeTab("browse");
         setNewChallenge({ type:"workout", goal:"", unit:"sessions", duration:7, customDuration:"", name:"" });
-        showToast("Challenge created! Code: " + id);
+        showToast("Challenge created! 🏆");
+
+        // Send invite if email provided
+        if (inviteEmail.trim()) {
+          await db.ref("challengeInvites/" + inviteEmail.replace(/\./g,",") + "/" + id).set({
+            challengeId: id, name: challenge.name, type: challenge.type,
+            from: userName, fromEmail: userEmail, at: Date.now()
+          });
+          setInviteEmail("");
+          showToast("Invite sent to " + inviteEmail + "! 📧");
+        }
       };
 
-      const joinChallenge = async () => {
-        const id = joinCode.trim().toUpperCase();
-        if (!id || !userName) return;
-        const snap = await db.ref("challenges/" + id).get();
-        if (!snap.exists()) { showToast("Challenge not found", "error"); return; }
-        await db.ref("challenges/" + id + "/players/" + userName).set({ name: userName, progress: 0, logs: {} });
-        const ids = JSON.parse(localStorage.getItem("mt-challenge-ids") || "[]");
-        if (!ids.includes(id)) localStorage.setItem("mt-challenge-ids", JSON.stringify([...ids, id]));
-        subscribeToChallenge(id);
-        setJoinCode("");
+      const acceptInvite = async (inviteId, challengeId) => {
+        if (!googleUser) return;
+        const snap = await db.ref("challenges/" + challengeId).get();
+        if (!snap.exists()) { showToast("Challenge no longer exists", "error"); return; }
+        await db.ref("challenges/" + challengeId + "/players/" + userId).set({
+          name: userName, email: userEmail, photo: userPhoto, uid: userId, progress: 0, dailySteps: {}
+        });
+        await db.ref("userChallenges/" + userId + "/" + challengeId).set(true);
+        await db.ref("challengeInvites/" + userEmail.replace(/\./g,",") + "/" + inviteId).remove();
+        subscribeToChallenge(challengeId);
         setChallengeTab("browse");
-        showToast("Joined challenge!");
+        showToast("Challenge accepted! 🏆");
       };
 
       const logChallengeProgress = async (challengeId, amount) => {
-        if (!userName) return;
+        if (!googleUser) return;
         const ch = challenges[challengeId];
         if (!ch) return;
-        const player = ch.players?.[userName] || { name: userName, progress: 0, logs: {} };
+        const player = ch.players?.[userId] || { name: userName, progress: 0 };
         const newProgress = (player.progress || 0) + amount;
-        const logKey = Date.now();
-        await db.ref("challenges/" + challengeId + "/players/" + userName).update({
-          progress: newProgress,
-          ["logs/" + logKey]: { amount, at: Date.now() }
+        await db.ref("challenges/" + challengeId + "/players/" + userId).update({
+          progress: newProgress, ["logs/" + Date.now()]: { amount, at: Date.now() }
         });
         showToast("Progress logged! 🏆");
       };
@@ -1108,9 +1167,91 @@
       const leaveChallenge = async (id) => {
         if (challengeListeners.current[id]) { challengeListeners.current[id](); delete challengeListeners.current[id]; }
         setChallenges(prev => { const n = {...prev}; delete n[id]; return n; });
+        await db.ref("userChallenges/" + userId + "/" + id).remove();
         const ids = JSON.parse(localStorage.getItem("mt-challenge-ids") || "[]");
         localStorage.setItem("mt-challenge-ids", JSON.stringify(ids.filter(i => i !== id)));
-        if (activeChallengeId === id) setActiveChallengeId(null);
+      };
+
+      // ── GARMIN ACTIVITY IMPORT ───────────────────────────────────────────────
+      const fetchGarminActivities = async () => {
+        if (!fitToken) { showToast("Connect Google Fit first", "error"); return; }
+        setActivitiesSyncing(true);
+        try {
+          const now = Date.now();
+          const start = new Date(); start.setDate(start.getDate() - 30); start.setHours(0,0,0,0);
+          const res = await fetch(
+            "https://www.googleapis.com/fitness/v1/users/me/sessions?startTime=" +
+            start.toISOString() + "&endTime=" + new Date(now).toISOString(),
+            { headers: { Authorization: "Bearer " + fitToken } }
+          );
+          if (res.status === 401) { disconnectGoogleFit(); showToast("Session expired — reconnect", "error"); return; }
+          const data = await res.json();
+          const activityTypes = {
+            7: "Biking", 8: "Biking (stationary)", 9: "Calisthenics", 10: "Circuit training",
+            11: "Crossfit", 13: "Elliptical", 15: "Functional strength", 16: "Golf",
+            17: "Guided breathing", 20: "HIIT", 21: "Hiking", 24: "Jump rope",
+            26: "Kickboxing", 28: "Martial arts", 29: "Meditation", 32: "Other (unclassified)",
+            35: "Running", 36: "Running (treadmill)", 37: "Rowing", 38: "Rowing (machine)",
+            41: "Skiing", 42: "Snowboarding", 45: "Soccer", 46: "Softball", 48: "Squash",
+            51: "Strength training", 52: "Stretching", 53: "Surfing", 54: "Swimming (open water)",
+            55: "Swimming (pool)", 56: "Team sports", 57: "Tennis", 58: "Treadmill (walking)",
+            60: "Volleyball", 62: "Walking", 63: "Watersports", 64: "Weightlifting",
+            68: "Yoga", 69: "Zumba", 72: "Sleep",
+          };
+          const sessions = (data.session || [])
+            .filter(s => s.activityType !== 72) // exclude sleep
+            .map(s => ({
+              id: s.id, name: s.name || activityTypes[s.activityType] || "Activity",
+              type: activityTypes[s.activityType] || "Activity",
+              activityType: s.activityType,
+              startMs: parseInt(s.startTimeMillis),
+              endMs: parseInt(s.endTimeMillis),
+              durationMins: Math.round((parseInt(s.endTimeMillis) - parseInt(s.startTimeMillis)) / 60000),
+              date: new Date(parseInt(s.startTimeMillis)).toLocaleDateString("en-US", { month:"short", day:"numeric" }),
+            }))
+            .sort((a,b) => b.startMs - a.startMs)
+            .slice(0, 30);
+          setGarminActivities(sessions);
+          showToast("Loaded " + sessions.length + " activities from Garmin 🏃");
+        } catch(e) {
+          showToast("Failed to load activities", "error");
+        }
+        setActivitiesSyncing(false);
+      };
+
+      const importActivityToWorkout = (activity) => {
+        const cardioTypes = { 35:"Running", 36:"Treadmill", 62:"Walking", 7:"Cycling - Outdoor",
+          8:"Cycling - Indoor", 37:"Indoor Rowing", 38:"Indoor Rowing", 13:"Elliptical",
+          20:"HIIT", 21:"Hiking", 24:"Jump Rope", 60:"Circuit Training" };
+        const cardioType = cardioTypes[activity.activityType];
+        if (cardioType) {
+          // Import as cardio
+          const w = {
+            id: Date.now(), type: "cardio", cardioType, name: cardioType,
+            date: dateKey(new Date(activity.startMs)),
+            duration: activity.durationMins, calories: "", distance: "",
+            notes: "Imported from Garmin: " + activity.name,
+          };
+          setWorkouts(prev => {
+            const dk = w.date;
+            return { ...prev, [dk]: [...(prev[dk]||[]), w] };
+          });
+        } else {
+          // Import as strength workout
+          const w = {
+            id: Date.now(), type: "workout",
+            date: dateKey(new Date(activity.startMs)),
+            name: activity.name,
+            exercises: [],
+            startTime: activity.startMs, endTime: activity.endMs,
+            notes: "Imported from Garmin",
+          };
+          setWorkouts(prev => {
+            const dk = w.date;
+            return { ...prev, [dk]: [...(prev[dk]||[]), w] };
+          });
+        }
+        showToast(activity.name + " imported! 💪");
       };
 
       // ── GOOGLE FIT ───────────────────────────────────────────────────────────
@@ -2787,37 +2928,76 @@
 
             {/* CHALLENGES TAB */}
             {tab === "challenge" && (() => {
-              const myChallenges = Object.values(challenges);
-              const now = Date.now();
               const TYPES = [
                 { id:"workout", label:"Workout Sessions", icon:"🏋️", units:["sessions"] },
                 { id:"running", label:"Running Distance", icon:"🏃", units:["miles","km"] },
                 { id:"steps",   label:"Step Count",       icon:"👟", units:["steps"] },
               ];
+              const now = Date.now();
+              const myChallenges = Object.values(challenges);
+              const pendingInvites = []; // loaded via Firebase listener below
 
-              // Username gate
-              if (!userName) return (
+              // Not signed in
+              if (authLoading) return (
+                <div style={{textAlign:"center", padding:"60px 20px", color:C.textLight}}>
+                  <div style={{fontSize:48, marginBottom:12}}>⏳</div>
+                  <div style={{fontSize:16, fontWeight:800, color:C.textMid}}>Loading...</div>
+                </div>
+              );
+
+              if (!googleUser) return (
                 <div style={{animation:"fadeIn 0.2s ease", textAlign:"center", padding:"40px 20px"}}>
                   <div style={{fontSize:52, marginBottom:16}}>🏆</div>
                   <div style={{fontSize:22, fontWeight:900, color:C.text, marginBottom:8}}>Head-to-Head Challenges</div>
-                  <div style={{fontSize:16, color:C.textLight, marginBottom:28}}>Set a display name to get started</div>
-                  <input placeholder="Your name (e.g. JP)" id="unameInput"
-                    style={{...inputStyle, marginBottom:12, textAlign:"center", fontSize:18, fontWeight:700}}
-                    onKeyDown={e => { if (e.key==="Enter" && e.target.value.trim()) saveUserName(e.target.value.trim()); }} />
-                  <button onClick={() => { const v=document.getElementById("unameInput").value.trim(); if(v) saveUserName(v); }}
-                    style={{width:"100%", padding:"14px", borderRadius:14, border:"none", background:C.blue, color:"#fff", fontWeight:800, fontSize:18, cursor:"pointer", fontFamily:"inherit"}}>
-                    Let's Go →
+                  <div style={{fontSize:15, color:C.textLight, marginBottom:12}}>Sign in with Google to challenge friends, track progress, and sync your Garmin activities automatically.</div>
+                  <div style={{background:C.blueLight, borderRadius:14, padding:16, marginBottom:24, textAlign:"left"}}>
+                    <div style={{fontSize:14, fontWeight:800, color:C.blue, marginBottom:8}}>✨ What you get:</div>
+                    {["Challenge friends by email — no codes needed","Garmin runs & workouts auto-import","Real-time step sync via Google Fit","Permanent account — never lose your history"].map((t,i) => (
+                      <div key={i} style={{fontSize:13, color:C.textMid, marginBottom:4}}>✓ {t}</div>
+                    ))}
+                  </div>
+                  <button onClick={signInWithGoogle}
+                    style={{width:"100%", padding:"16px", borderRadius:14, border:"none", background:C.blue, color:"#fff", fontWeight:900, fontSize:17, cursor:"pointer", fontFamily:"inherit", display:"flex", alignItems:"center", justifyContent:"center", gap:10}}>
+                    <span style={{fontSize:20}}>G</span> Sign in with Google
                   </button>
                 </div>
               );
 
               return (
                 <div style={{animation:"fadeIn 0.2s ease"}}>
+                  {/* User profile strip */}
+                  <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14, background:C.card, borderRadius:14, border:"1px solid "+C.border, padding:"12px 14px"}}>
+                    <div style={{display:"flex", alignItems:"center", gap:10}}>
+                      {userPhoto ? <img src={userPhoto} alt="" style={{width:36, height:36, borderRadius:99, objectFit:"cover"}} /> : <div style={{width:36, height:36, borderRadius:99, background:C.blueLight, display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, fontWeight:800, color:C.blue}}>{userName[0]}</div>}
+                      <div>
+                        <div style={{fontSize:15, fontWeight:800, color:C.text}}>{userName}</div>
+                        <div style={{fontSize:12, color:C.textLight}}>{userEmail}</div>
+                      </div>
+                    </div>
+                    <button onClick={signOut} style={{fontSize:12, color:C.textLight, background:"none", border:"1px solid "+C.border, borderRadius:8, padding:"6px 12px", cursor:"pointer", fontFamily:"inherit", fontWeight:700}}>Sign out</button>
+                  </div>
+
+                  {/* Google Fit status */}
+                  <div style={{background:fitConnected?C.greenLight:C.bg, borderRadius:14, border:"1px solid "+(fitConnected?C.green:C.border), padding:"12px 16px", marginBottom:14, display:"flex", alignItems:"center", justifyContent:"space-between"}}>
+                    <div>
+                      <div style={{fontSize:13, fontWeight:800, color:fitConnected?C.green:C.textMid}}>{fitConnected?"✅ Google Fit + Garmin Connected":"📱 Google Fit Not Connected"}</div>
+                      <div style={{fontSize:12, color:C.textLight, marginTop:2}}>{fitConnected?(fitSteps!==null?fitSteps.toLocaleString()+" steps today":"Tap sync to load"):"Connect to sync Garmin activities"}</div>
+                    </div>
+                    {fitConnected ? (
+                      <div style={{display:"flex", gap:6}}>
+                        <button onClick={() => fetchAllFitData()} style={{padding:"7px 12px", borderRadius:10, border:"none", background:fitSyncing?C.border:C.green, color:"#fff", fontWeight:800, fontSize:13, cursor:"pointer", fontFamily:"inherit"}}>{fitSyncing?"...":"↻"}</button>
+                        <button onClick={disconnectGoogleFit} style={{padding:"7px 10px", borderRadius:10, border:"1px solid "+C.border, background:C.card, color:C.textLight, fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit"}}>Disconnect</button>
+                      </div>
+                    ) : (
+                      <button onClick={signInWithGoogle} style={{padding:"9px 14px", borderRadius:10, border:"none", background:C.blue, color:"#fff", fontWeight:800, fontSize:13, cursor:"pointer", fontFamily:"inherit"}}>Connect</button>
+                    )}
+                  </div>
+
                   {/* Sub-tabs */}
                   <div style={{display:"flex", background:C.border, borderRadius:12, padding:3, marginBottom:16}}>
-                    {[["browse","🏆 My Challenges"],["create","➕ Create"],["join","🔗 Join"]].map(([t,label]) => (
-                      <button key={t} onClick={() => setChallengeTab(t)}
-                        style={{flex:1, padding:"8px 4px", borderRadius:10, fontSize:13, fontWeight:800, border:"none", cursor:"pointer", fontFamily:"inherit",
+                    {[["browse","🏆 Challenges"],["create","➕ Create"],["activities","🏃 Activities"]].map(([t,label]) => (
+                      <button key={t} onClick={() => { setChallengeTab(t); if(t==="activities" && garminActivities.length===0) fetchGarminActivities(); }}
+                        style={{flex:1, padding:"8px 4px", borderRadius:10, fontSize:12, fontWeight:800, border:"none", cursor:"pointer", fontFamily:"inherit",
                           background:challengeTab===t?C.card:"transparent", color:challengeTab===t?C.blue:C.textLight,
                           boxShadow:challengeTab===t?"0 2px 8px rgba(0,0,0,0.1)":"none"}}>
                         {label}
@@ -2828,90 +3008,46 @@
                   {/* BROWSE */}
                   {challengeTab === "browse" && (
                     <div>
-                      <div style={{fontSize:14, color:C.textLight, fontWeight:700, marginBottom:12}}>
-                        Playing as <span style={{color:C.blue, fontWeight:800}}>{userName}</span>
-                        <button onClick={() => saveUserName("")} style={{marginLeft:8, fontSize:13, color:C.textLight, background:"none", border:"none", cursor:"pointer", fontFamily:"inherit", textDecoration:"underline"}}>change</button>
-                      </div>
-
-                      {/* Google Fit connection status */}
-                      <div style={{background:fitConnected?C.greenLight:C.bg, borderRadius:14, border:`1px solid ${fitConnected?C.green:C.border}`, padding:"12px 16px", marginBottom:14, display:"flex", alignItems:"center", justifyContent:"space-between"}}>
-                        <div>
-                          <div style={{fontSize:14, fontWeight:800, color:fitConnected?C.green:C.textMid}}>
-                            {fitConnected ? "✅ Google Fit Connected" : "📱 Google Fit Not Connected"}
-                          </div>
-                          <div style={{fontSize:13, color:C.textLight, marginTop:2}}>
-                            {fitConnected
-                              ? (fitSteps !== null ? fitSteps.toLocaleString() + " steps today from Garmin" : "Tap sync to load today's steps")
-                              : "Connect to auto-sync Garmin steps"}
-                          </div>
-                        </div>
-                        {fitConnected ? (
-                          <div style={{display:"flex", gap:6}}>
-                            <button onClick={() => fetchAllFitData()}
-                              style={{padding:"7px 12px", borderRadius:10, border:"none", background:C.green, color:"#fff", fontWeight:800, fontSize:14, cursor:"pointer", fontFamily:"inherit"}}>
-                              {fitSyncing ? "..." : "↻"}
-                            </button>
-                            <button onClick={disconnectGoogleFit}
-                              style={{padding:"7px 10px", borderRadius:10, border:`1px solid ${C.border}`, background:C.card, color:C.textLight, fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit"}}>
-                              Disconnect
-                            </button>
-                          </div>
-                        ) : (
-                          <button onClick={connectGoogleFit}
-                            style={{padding:"9px 14px", borderRadius:10, border:"none", background:C.blue, color:"#fff", fontWeight:800, fontSize:14, cursor:"pointer", fontFamily:"inherit"}}>
-                            Connect
-                          </button>
-                        )}
-                      </div>
                       {myChallenges.length === 0 ? (
                         <div style={{textAlign:"center", padding:"40px 20px", color:C.textLight}}>
                           <div style={{fontSize:48, marginBottom:12}}>🥊</div>
-                          <div style={{fontSize:18, fontWeight:800, color:C.textMid, marginBottom:8}}>No active challenges</div>
-                          <div style={{fontSize:15, marginBottom:24}}>Create one or join with a code</div>
-                          <div style={{display:"flex", gap:8}}>
-                            <button onClick={() => setChallengeTab("create")} style={{flex:1, padding:"12px", borderRadius:12, border:"none", background:C.blue, color:"#fff", fontWeight:800, fontSize:16, cursor:"pointer", fontFamily:"inherit"}}>Create</button>
-                            <button onClick={() => setChallengeTab("join")} style={{flex:1, padding:"12px", borderRadius:12, border:`1.5px solid ${C.border}`, background:C.card, color:C.textMid, fontWeight:800, fontSize:16, cursor:"pointer", fontFamily:"inherit"}}>Join</button>
-                          </div>
+                          <div style={{fontSize:17, fontWeight:800, color:C.textMid, marginBottom:8}}>No active challenges</div>
+                          <div style={{fontSize:14, marginBottom:24}}>Create one and invite a friend by email</div>
+                          <button onClick={() => setChallengeTab("create")} style={{padding:"13px 28px", borderRadius:12, border:"none", background:C.blue, color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer", fontFamily:"inherit"}}>Create Challenge</button>
                         </div>
                       ) : myChallenges.map(ch => {
                         const players = Object.values(ch.players || {}).sort((a,b) => (b.progress||0)-(a.progress||0));
-                        const me = ch.players?.[userName];
+                        const me = ch.players?.[userId];
                         const myProgress = me?.progress || 0;
-                        const opponent = players.find(p => p.name !== userName);
+                        const opponent = players.find(p => p.uid !== userId);
                         const oppProgress = opponent?.progress || 0;
-                        const isMostWins = ch.mostWins || ch.type === "steps";
-                        // For most-wins: bar shows % of combined total or vs each other
+                        const isMostWins = ch.mostWins || ch.type==="steps";
                         const maxProgress = Math.max(myProgress, oppProgress, 1);
-                        const pct = isMostWins ? Math.min((myProgress / maxProgress) * 100, 100) : Math.min((myProgress / ch.goal) * 100, 100);
-                        const oppPct = isMostWins ? Math.min((oppProgress / maxProgress) * 100, 100) : Math.min((oppProgress / ch.goal) * 100, 100);
-                        const daysLeft = Math.max(0, Math.ceil((ch.endsAt - now) / 86400000));
+                        const pct = isMostWins ? Math.min((myProgress/maxProgress)*100, 100) : Math.min((myProgress/ch.goal)*100, 100);
+                        const oppPct = isMostWins ? Math.min((oppProgress/maxProgress)*100, 100) : Math.min((oppProgress/ch.goal)*100, 100);
+                        const daysLeft = Math.max(0, Math.ceil((ch.endsAt-now)/86400000));
                         const ended = now > ch.endsAt;
-                        const typeInfo = TYPES.find(t => t.id === ch.type) || TYPES[0];
-                        const winner = ended ? (myProgress > oppProgress ? "you" : myProgress < oppProgress ? "them" : "tie") : null;
-                        // Leading indicator for active challenges
-                        const leading = !ended && opponent ? (myProgress > oppProgress ? "you" : myProgress < oppProgress ? "them" : "tied") : null;
+                        const typeInfo = TYPES.find(t => t.id===ch.type) || TYPES[0];
+                        const winner = ended ? (myProgress>oppProgress?"you":myProgress<oppProgress?"them":"tie") : null;
+                        const leading = !ended && opponent ? (myProgress>oppProgress?"you":myProgress<oppProgress?"them":"tied") : null;
                         return (
-                          <div key={ch.id} style={{background:C.card, borderRadius:16, border:`1px solid ${C.border}`, padding:16, marginBottom:14, boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
-                            {/* Header */}
+                          <div key={ch.id} style={{background:C.card, borderRadius:16, border:"1px solid "+C.border, padding:16, marginBottom:14, boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
                             <div style={{display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:12}}>
                               <div>
-                                <div style={{fontSize:18, fontWeight:900, color:C.text}}>{typeInfo.icon} {ch.name}</div>
+                                <div style={{fontSize:17, fontWeight:900, color:C.text}}>{typeInfo.icon} {ch.name}</div>
                                 <div style={{fontSize:13, color:C.textLight, fontWeight:600, marginTop:2}}>
-                                  {isMostWins ? "Most steps wins" : `Goal: ${ch.goal} ${ch.unit}`} · {ended ? "Ended" : daysLeft+" day"+( daysLeft!==1?"s":"")+` left`} · Code: <span style={{fontWeight:800, color:C.blue, letterSpacing:1}}>{ch.id}</span>
+                                  {isMostWins?"Most steps wins":`Goal: ${ch.goal} ${ch.unit}`} · {ended?"Ended":daysLeft+" day"+(daysLeft!==1?"s":"")+" left"}
                                 </div>
                               </div>
                               <div style={{display:"flex", flexDirection:"column", alignItems:"flex-end", gap:4}}>
                                 {ended && winner && (
-                                  <div style={{fontSize:13, fontWeight:800, padding:"4px 10px", borderRadius:99,
-                                    background: winner==="you" ? C.green : winner==="tie" ? C.orange : C.red, color:"#fff"}}>
-                                    {winner==="you" ? "🏆 Won!" : winner==="tie" ? "🤝 Tie" : "😤 Lost"}
+                                  <div style={{fontSize:13, fontWeight:800, padding:"4px 10px", borderRadius:99, background:winner==="you"?C.green:winner==="tie"?C.orange:C.red, color:"#fff"}}>
+                                    {winner==="you"?"🏆 Won!":winner==="tie"?"🤝 Tie":"😤 Lost"}
                                   </div>
                                 )}
                                 {leading && (
-                                  <div style={{fontSize:11, fontWeight:800, padding:"3px 8px", borderRadius:99,
-                                    background: leading==="you" ? C.greenLight : leading==="tied" ? C.orangeLight||"#fff3e0" : C.redLight||"#fdecea",
-                                    color: leading==="you" ? C.green : leading==="tied" ? C.orange : C.red}}>
-                                    {leading==="you" ? "🔥 You're leading" : leading==="tied" ? "⚡ Tied" : "😤 Behind"}
+                                  <div style={{fontSize:12, fontWeight:800, padding:"3px 8px", borderRadius:99, background:leading==="you"?C.greenLight:leading==="tied"?C.orangeLight:C.redLight, color:leading==="you"?C.green:leading==="tied"?C.orange:C.red}}>
+                                    {leading==="you"?"🔥 Leading":leading==="tied"?"⚡ Tied":"😤 Behind"}
                                   </div>
                                 )}
                               </div>
@@ -2919,122 +3055,84 @@
 
                             {/* VS bars */}
                             <div style={{marginBottom:14}}>
-                              {/* Me */}
                               <div style={{marginBottom:8}}>
                                 <div style={{display:"flex", justifyContent:"space-between", marginBottom:4}}>
-                                  <span style={{fontSize:15, fontWeight:800, color:C.blue}}>{userName} (you)</span>
-                                  <span style={{fontSize:15, fontWeight:800, color:C.blue}}>
-                                    {isMostWins ? myProgress.toLocaleString() + " steps" : myProgress + " / " + ch.goal + " " + ch.unit}
-                                  </span>
+                                  <div style={{display:"flex", alignItems:"center", gap:6}}>
+                                    {userPhoto && <img src={userPhoto} alt="" style={{width:20,height:20,borderRadius:99,objectFit:"cover"}} />}
+                                    <span style={{fontSize:14, fontWeight:800, color:C.blue}}>{userName} (you)</span>
+                                  </div>
+                                  <span style={{fontSize:14, fontWeight:800, color:C.blue}}>{isMostWins?myProgress.toLocaleString()+" steps":myProgress+" / "+ch.goal+" "+ch.unit}</span>
                                 </div>
                                 <div style={{height:10, background:C.border, borderRadius:99, overflow:"hidden"}}>
-                                  <div style={{height:"100%", width:`${pct}%`, background:C.blue, borderRadius:99, transition:"width 0.5s ease"}} />
+                                  <div style={{height:"100%", width:pct+"%", background:C.blue, borderRadius:99, transition:"width 0.5s ease"}} />
                                 </div>
-                                {isMostWins && me?.lastSynced && (
-                                  <div style={{fontSize:11, color:C.textLight, marginTop:3}}>
-                                    Last synced {new Date(me.lastSynced).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"})}
-                                  </div>
-                                )}
+                                {isMostWins && me?.lastSynced && <div style={{fontSize:11, color:C.textLight, marginTop:3}}>Last synced {new Date(me.lastSynced).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"})}</div>}
                               </div>
-                              {/* VS divider */}
                               <div style={{textAlign:"center", fontSize:13, fontWeight:800, color:C.textLight, marginBottom:8}}>VS</div>
-                              {/* Opponent */}
                               {opponent ? (
                                 <div>
                                   <div style={{display:"flex", justifyContent:"space-between", marginBottom:4}}>
-                                    <span style={{fontSize:15, fontWeight:800, color:C.orange}}>{opponent.name}</span>
-                                    <span style={{fontSize:15, fontWeight:800, color:C.orange}}>
-                                      {isMostWins ? oppProgress.toLocaleString() + " steps" : oppProgress + " / " + ch.goal + " " + ch.unit}
-                                    </span>
+                                    <div style={{display:"flex", alignItems:"center", gap:6}}>
+                                      {opponent.photo && <img src={opponent.photo} alt="" style={{width:20,height:20,borderRadius:99,objectFit:"cover"}} />}
+                                      <span style={{fontSize:14, fontWeight:800, color:C.orange}}>{opponent.name}</span>
+                                    </div>
+                                    <span style={{fontSize:14, fontWeight:800, color:C.orange}}>{isMostWins?oppProgress.toLocaleString()+" steps":oppProgress+" / "+ch.goal+" "+ch.unit}</span>
                                   </div>
                                   <div style={{height:10, background:C.border, borderRadius:99, overflow:"hidden"}}>
-                                    <div style={{height:"100%", width:`${oppPct}%`, background:C.orange, borderRadius:99, transition:"width 0.5s ease"}} />
+                                    <div style={{height:"100%", width:oppPct+"%", background:C.orange, borderRadius:99, transition:"width 0.5s ease"}} />
                                   </div>
-                                  {isMostWins && opponent?.lastSynced && (
-                                    <div style={{fontSize:11, color:C.textLight, marginTop:3}}>
-                                      Last synced {new Date(opponent.lastSynced).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"})}
-                                    </div>
-                                  )}
+                                  {isMostWins && opponent?.lastSynced && <div style={{fontSize:11, color:C.textLight, marginTop:3}}>Last synced {new Date(opponent.lastSynced).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"})}</div>}
                                 </div>
                               ) : (
-                                <div style={{textAlign:"center", padding:"10px", background:C.bg, borderRadius:10, fontSize:14, color:C.textLight}}>
-                                  Waiting for opponent · Share code <span style={{fontWeight:800, color:C.blue}}>{ch.id}</span>
+                                <div style={{textAlign:"center", padding:12, background:C.bg, borderRadius:10, fontSize:13, color:C.textLight}}>
+                                  Waiting for opponent — invite them from the Create tab
                                 </div>
                               )}
                             </div>
 
                             {/* Log Progress */}
                             {!ended && (
-                              <div>
-                                <div style={{fontSize:14, fontWeight:800, color:C.textMid, marginBottom:8}}>Log Progress</div>
-                                <div style={{display:"flex", gap:8}}>
-                                  {ch.type === "workout" && (
-                                    <button onClick={() => logChallengeProgress(ch.id, 1)}
-                                      style={{flex:1, padding:"11px", borderRadius:12, border:"none", background:C.blue, color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer", fontFamily:"inherit"}}>
-                                      + 1 Workout Session
-                                    </button>
-                                  )}
-                                  {ch.type === "running" && (() => {
-                                    const rKey = "run-"+ch.id;
-                                    return (
-                                      <div style={{display:"flex", gap:8, flex:1}}>
-                                        <input type="number" placeholder={"Miles run"} id={rKey}
-                                          style={{...inputStyle, flex:1, padding:"10px 12px"}} />
-                                        <button onClick={() => { const v=parseFloat(document.getElementById(rKey)?.value||0); if(v>0){logChallengeProgress(ch.id,v);document.getElementById(rKey).value="";} }}
-                                          style={{padding:"11px 16px", borderRadius:12, border:"none", background:C.green, color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer", fontFamily:"inherit"}}>
-                                          Log
-                                        </button>
-                                      </div>
-                                    );
-                                  })()}
-                                  {ch.type === "steps" && (() => {
-                                    const sKey = "steps-"+ch.id;
-                                    const myLastSync = ch.players?.[userName]?.lastSynced;
-                                    return (
-                                      <div style={{display:"flex", flexDirection:"column", gap:8}}>
-                                        {fitConnected ? (
-                                          <div>
-                                            <div style={{background:C.greenLight, borderRadius:12, padding:"12px 14px", marginBottom:8}}>
-                                              <div style={{fontSize:13, fontWeight:800, color:C.green, marginBottom:2}}>🔗 Garmin → Google Fit → Challenge</div>
-                                              <div style={{fontSize:13, color:C.textMid, fontWeight:600}}>Syncs your total steps since the challenge started — whoever has most wins</div>
-                                              {myLastSync && <div style={{fontSize:12, color:C.textLight, marginTop:4}}>Last synced: {new Date(myLastSync).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</div>}
-                                            </div>
-                                            <button onClick={() => syncFitStepsToChallenge(ch.id)}
-                                              style={{width:"100%", padding:"13px", borderRadius:12, border:"none", background:fitSyncing?C.border:C.green, color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer", fontFamily:"inherit"}}>
-                                              {fitSyncing ? "⏳ Syncing from Garmin..." : "↻ Sync Steps from Garmin"}
-                                            </button>
+                              <div style={{marginBottom:10}}>
+                                <div style={{fontSize:13, fontWeight:800, color:C.textMid, marginBottom:8}}>Log Progress</div>
+                                {ch.type==="workout" && (
+                                  <button onClick={() => logChallengeProgress(ch.id, 1)} style={{width:"100%", padding:"12px", borderRadius:12, border:"none", background:C.blue, color:"#fff", fontWeight:800, fontSize:14, cursor:"pointer", fontFamily:"inherit"}}>+ 1 Workout Session</button>
+                                )}
+                                {ch.type==="running" && (() => {
+                                  const rKey = "run-"+ch.id;
+                                  return (
+                                    <div style={{display:"flex", gap:8}}>
+                                      <input type="number" placeholder="Miles run" id={rKey} style={{...inputStyle, flex:1, padding:"10px 12px"}} />
+                                      <button onClick={() => { const v=parseFloat(document.getElementById(rKey)?.value||0); if(v>0){logChallengeProgress(ch.id,v);document.getElementById(rKey).value="";} }} style={{padding:"11px 16px", borderRadius:12, border:"none", background:C.green, color:"#fff", fontWeight:800, cursor:"pointer", fontFamily:"inherit"}}>Log</button>
+                                    </div>
+                                  );
+                                })()}
+                                {ch.type==="steps" && (() => {
+                                  const myLastSync = ch.players?.[userId]?.lastSynced;
+                                  return (
+                                    <div>
+                                      {fitConnected ? (
+                                        <div>
+                                          <div style={{background:C.greenLight, borderRadius:12, padding:"12px 14px", marginBottom:8}}>
+                                            <div style={{fontSize:13, fontWeight:800, color:C.green, marginBottom:2}}>🔗 Garmin → Google Fit → Challenge</div>
+                                            <div style={{fontSize:13, color:C.textMid}}>Syncs total steps since challenge started</div>
+                                            {myLastSync && <div style={{fontSize:12, color:C.textLight, marginTop:4}}>Last synced: {new Date(myLastSync).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</div>}
                                           </div>
-                                        ) : (
-                                          <div>
-                                            <div style={{background:C.blueLight, borderRadius:10, padding:"10px 14px", marginBottom:8, fontSize:13, color:C.blue, fontWeight:700}}>
-                                              🔗 Connect Google Fit to auto-sync Garmin steps
-                                            </div>
-                                            <button onClick={connectGoogleFit}
-                                              style={{width:"100%", padding:"11px", borderRadius:12, border:"none", background:C.blue, color:"#fff", fontWeight:800, fontSize:14, cursor:"pointer", fontFamily:"inherit", marginBottom:8}}>
-                                              Connect Google Fit
-                                            </button>
-                                            <div style={{display:"flex", gap:8}}>
-                                              <input type="number" placeholder="Or enter steps manually" id={sKey}
-                                                style={{...inputStyle, flex:1, padding:"10px 12px"}} />
-                                              <button onClick={() => { const v=parseFloat(document.getElementById(sKey)?.value||0); if(v>0){logChallengeProgress(ch.id,v);document.getElementById(sKey).value="";} }}
-                                                style={{padding:"11px 16px", borderRadius:12, border:"none", background:C.purple, color:"#fff", fontWeight:800, fontSize:14, cursor:"pointer", fontFamily:"inherit"}}>
-                                                Log
-                                              </button>
-                                            </div>
-                                          </div>
-                                        )}
-                                      </div>
-                                    );
-                                  })()}
-                                </div>
+                                          <button onClick={() => syncFitStepsToChallenge(ch.id)} style={{width:"100%", padding:"13px", borderRadius:12, border:"none", background:fitSyncing?C.border:C.green, color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer", fontFamily:"inherit"}}>
+                                            {fitSyncing?"⏳ Syncing...":"↻ Sync Steps from Garmin"}
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <div>
+                                          <div style={{background:C.blueLight, borderRadius:10, padding:"10px 14px", marginBottom:8, fontSize:13, color:C.blue, fontWeight:700}}>Connect Google Fit to auto-sync Garmin steps</div>
+                                          <button onClick={signInWithGoogle} style={{width:"100%", padding:"11px", borderRadius:12, border:"none", background:C.blue, color:"#fff", fontWeight:800, fontSize:14, cursor:"pointer", fontFamily:"inherit", marginBottom:8}}>Connect Google Fit</button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             )}
-
-                            {/* Leave */}
-                            <button onClick={() => leaveChallenge(ch.id)}
-                              style={{width:"100%", marginTop:10, padding:"8px", borderRadius:10, border:`1px solid ${C.border}`, background:"transparent", color:C.textLight, fontWeight:700, fontSize:14, cursor:"pointer", fontFamily:"inherit"}}>
-                              Leave Challenge
-                            </button>
+                            <button onClick={() => leaveChallenge(ch.id)} style={{width:"100%", padding:"9px", borderRadius:10, border:"1px solid "+C.border, background:"transparent", color:C.textLight, fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit"}}>Leave Challenge</button>
                           </div>
                         );
                       })}
@@ -3043,127 +3141,109 @@
 
                   {/* CREATE */}
                   {challengeTab === "create" && (
-                    <div>
-                      <div style={{background:C.card, borderRadius:16, border:`1px solid ${C.border}`, padding:16}}>
-                        <div style={{fontSize:17, fontWeight:800, color:C.text, marginBottom:16}}>Create a Challenge</div>
+                    <div style={{background:C.card, borderRadius:16, border:"1px solid "+C.border, padding:16}}>
+                      <div style={{fontSize:16, fontWeight:800, color:C.text, marginBottom:16}}>Create a Challenge</div>
 
-                        <label style={{fontSize:14, color:C.textMid, fontWeight:700, display:"block", marginBottom:6}}>Challenge Name</label>
-                        <input placeholder="e.g. Week 1 Grind" value={newChallenge.name}
-                          onChange={e => setNewChallenge(n => ({...n, name:e.target.value}))}
-                          style={{...inputStyle, marginBottom:14}} />
+                      <label style={{fontSize:13, color:C.textMid, fontWeight:700, display:"block", marginBottom:6}}>Challenge Name</label>
+                      <input placeholder="e.g. April Step Battle" value={newChallenge.name} onChange={e => setNewChallenge(n => ({...n, name:e.target.value}))} style={{...inputStyle, marginBottom:14}} />
 
-                        <label style={{fontSize:14, color:C.textMid, fontWeight:700, display:"block", marginBottom:8}}>Type</label>
-                        <div style={{display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:14}}>
-                          {TYPES.map(t => (
-                            <button key={t.id} onClick={() => setNewChallenge(n => ({...n, type:t.id, unit:t.units[0]}))}
-                              style={{padding:"12px 6px", borderRadius:12, border:newChallenge.type===t.id?`2px solid ${C.blue}`:`2px solid ${C.border}`,
-                                background:newChallenge.type===t.id?C.blueLight:C.bg, color:newChallenge.type===t.id?C.blue:C.textMid,
-                                fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit", display:"flex", flexDirection:"column", alignItems:"center", gap:4}}>
-                              <span style={{fontSize:22}}>{t.icon}</span>{t.label}
-                            </button>
-                          ))}
-                        </div>
+                      <label style={{fontSize:13, color:C.textMid, fontWeight:700, display:"block", marginBottom:8}}>Invite Opponent (Gmail)</label>
+                      <input placeholder="friend@gmail.com" type="email" value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} style={{...inputStyle, marginBottom:14}} />
 
-                        <div style={{display:"grid", gridTemplateColumns: newChallenge.type==="steps" ? "1fr" : "1fr 1fr", gap:10, marginBottom:14}}>
-                          {newChallenge.type !== "steps" && (
-                            <div>
-                              <label style={{fontSize:14, color:C.textMid, fontWeight:700, display:"block", marginBottom:6}}>
-                                Goal ({newChallenge.unit})
-                              </label>
-                              <input type="number" placeholder={newChallenge.type==="running"?"20":"5"}
-                                value={newChallenge.goal} onChange={e => setNewChallenge(n => ({...n, goal:e.target.value}))}
-                                style={{...inputStyle}} />
-                            </div>
-                          )}
-                          {newChallenge.type === "steps" && (
-                            <div style={{background:C.greenLight, borderRadius:12, padding:"12px 14px"}}>
-                              <div style={{fontSize:13, fontWeight:800, color:C.green, marginBottom:2}}>👟 Most Steps Wins</div>
-                              <div style={{fontSize:13, color:C.textMid}}>No goal needed — whoever accumulates the most steps by the end date wins automatically</div>
-                            </div>
-                          )}
+                      <label style={{fontSize:13, color:C.textMid, fontWeight:700, display:"block", marginBottom:8}}>Type</label>
+                      <div style={{display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:14}}>
+                        {TYPES.map(t => (
+                          <button key={t.id} onClick={() => setNewChallenge(n => ({...n, type:t.id, unit:t.units[0]}))}
+                            style={{padding:"12px 6px", borderRadius:12, border:newChallenge.type===t.id?"2px solid "+C.blue:"2px solid "+C.border,
+                              background:newChallenge.type===t.id?C.blueLight:C.bg, color:newChallenge.type===t.id?C.blue:C.textMid,
+                              fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit", display:"flex", flexDirection:"column", alignItems:"center", gap:4}}>
+                            <span style={{fontSize:20}}>{t.icon}</span>{t.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div style={{display:"grid", gridTemplateColumns:newChallenge.type==="steps"?"1fr":"1fr 1fr", gap:10, marginBottom:14}}>
+                        {newChallenge.type!=="steps" && (
                           <div>
-                            <label style={{fontSize:14, color:C.textMid, fontWeight:700, display:"block", marginBottom:6}}>Duration</label>
-                            <div style={{display:"flex", gap:4, marginBottom:6}}>
-                              {[3,7,14,30].map(d => (
-                                <button key={d} onClick={() => setNewChallenge(n => ({...n, duration:d, customDuration:""}))}
-                                  style={{flex:1, padding:"10px 2px", borderRadius:10,
-                                    border: (newChallenge.duration===d && !newChallenge.customDuration) ? `2px solid ${C.blue}` : `1.5px solid ${C.border}`,
-                                    background: (newChallenge.duration===d && !newChallenge.customDuration) ? C.blueLight : C.bg,
-                                    color: (newChallenge.duration===d && !newChallenge.customDuration) ? C.blue : C.textMid,
-                                    fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit"}}>
-                                  {d}d
-                                </button>
-                              ))}
-                            </div>
-                            <div style={{position:"relative"}}>
-                              <input type="number" placeholder="Custom days (e.g. 21)"
-                                value={newChallenge.customDuration}
-                                onChange={e => setNewChallenge(n => ({...n, customDuration:e.target.value}))}
-                                style={{...inputStyle, borderColor: newChallenge.customDuration ? C.blue : C.border,
-                                  boxShadow: newChallenge.customDuration ? `0 0 0 3px rgba(46,107,58,0.12)` : "none"}} />
-                              {newChallenge.customDuration && (
-                                <div style={{position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", fontSize:13, color:C.blue, fontWeight:700}}>
-                                  days
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-
-                        {newChallenge.type !== "workout" && TYPES.find(t=>t.id===newChallenge.type)?.units.length > 1 && (
-                          <div style={{marginBottom:14}}>
-                            <label style={{fontSize:14, color:C.textMid, fontWeight:700, display:"block", marginBottom:6}}>Unit</label>
-                            <div style={{display:"flex", gap:8}}>
-                              {TYPES.find(t=>t.id===newChallenge.type).units.map(u => (
-                                <button key={u} onClick={() => setNewChallenge(n => ({...n, unit:u}))}
-                                  style={{padding:"8px 16px", borderRadius:99, border:newChallenge.unit===u?`2px solid ${C.blue}`:`2px solid ${C.border}`,
-                                    background:newChallenge.unit===u?C.blueLight:C.bg, color:newChallenge.unit===u?C.blue:C.textMid,
-                                    fontWeight:700, fontSize:15, cursor:"pointer", fontFamily:"inherit"}}>
-                                  {u}
-                                </button>
-                              ))}
-                            </div>
+                            <label style={{fontSize:13, color:C.textMid, fontWeight:700, display:"block", marginBottom:6}}>Goal ({newChallenge.unit})</label>
+                            <input type="number" placeholder={newChallenge.type==="running"?"20":"5"} value={newChallenge.goal} onChange={e => setNewChallenge(n => ({...n, goal:e.target.value}))} style={{...inputStyle}} />
                           </div>
                         )}
-
-                        <div style={{background:C.blueLight, borderRadius:12, padding:12, marginBottom:16, fontSize:14, color:C.blue, fontWeight:700}}>
-                          📋 After creating, share the 6-letter code with your opponent so they can join
+                        {newChallenge.type==="steps" && (
+                          <div style={{background:C.greenLight, borderRadius:12, padding:"12px 14px"}}>
+                            <div style={{fontSize:14, fontWeight:800, color:C.green}}>👟 Most Steps Wins</div>
+                            <div style={{fontSize:13, color:C.textMid, marginTop:2}}>No goal needed — highest count at end wins</div>
+                          </div>
+                        )}
+                        <div>
+                          <label style={{fontSize:13, color:C.textMid, fontWeight:700, display:"block", marginBottom:6}}>Duration</label>
+                          <div style={{display:"flex", gap:4, marginBottom:6}}>
+                            {[3,7,14,30].map(d => (
+                              <button key={d} onClick={() => setNewChallenge(n => ({...n, duration:d, customDuration:""}))}
+                                style={{flex:1, padding:"9px 2px", borderRadius:10, border:(newChallenge.duration===d&&!newChallenge.customDuration)?"2px solid "+C.blue:"1.5px solid "+C.border,
+                                  background:(newChallenge.duration===d&&!newChallenge.customDuration)?C.blueLight:C.bg, color:(newChallenge.duration===d&&!newChallenge.customDuration)?C.blue:C.textMid,
+                                  fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit"}}>
+                                {d}d
+                              </button>
+                            ))}
+                          </div>
+                          <input type="number" placeholder="Custom days" value={newChallenge.customDuration} onChange={e => setNewChallenge(n => ({...n, customDuration:e.target.value}))} style={{...inputStyle}} />
                         </div>
-
-                        <button onClick={createChallenge}
-                          style={{width:"100%", padding:"14px", borderRadius:14, border:"none",
-                            background:(newChallenge.name && (newChallenge.type==="steps" || newChallenge.goal)) ? C.blue : C.border,
-                            color:(newChallenge.name && (newChallenge.type==="steps" || newChallenge.goal)) ? "#fff" : C.textLight,
-                            fontWeight:800, fontSize:18, cursor:"pointer", fontFamily:"inherit"}}>
-                          Create Challenge 🚀
-                        </button>
                       </div>
+
+                      <div style={{background:C.blueLight, borderRadius:12, padding:12, marginBottom:16, fontSize:13, color:C.blue, fontWeight:700}}>
+                        📧 Your opponent will get an invite notification — they accept and jump straight in, no codes needed
+                      </div>
+
+                      <button onClick={createChallenge}
+                        style={{width:"100%", padding:"15px", borderRadius:14, border:"none",
+                          background:(newChallenge.name&&(newChallenge.type==="steps"||newChallenge.goal))?C.blue:C.border,
+                          color:(newChallenge.name&&(newChallenge.type==="steps"||newChallenge.goal))?"#fff":C.textLight,
+                          fontWeight:800, fontSize:17, cursor:"pointer", fontFamily:"inherit"}}>
+                        Create Challenge 🚀
+                      </button>
                     </div>
                   )}
 
-                  {/* JOIN */}
-                  {challengeTab === "join" && (
-                    <div style={{background:C.card, borderRadius:16, border:`1px solid ${C.border}`, padding:16}}>
-                      <div style={{fontSize:17, fontWeight:800, color:C.text, marginBottom:8}}>Join a Challenge</div>
-                      <div style={{fontSize:15, color:C.textLight, marginBottom:20}}>Enter the 6-letter code your friend shared with you</div>
-                      <label style={{fontSize:14, color:C.textMid, fontWeight:700, display:"block", marginBottom:6}}>Challenge Code</label>
-                      <input placeholder="e.g. AB1C2D" value={joinCode}
-                        onChange={e => setJoinCode(e.target.value.toUpperCase())}
-                        style={{...inputStyle, fontSize:22, fontWeight:900, letterSpacing:4, textAlign:"center", marginBottom:16}}
-                        maxLength={6} />
-                      <button onClick={joinChallenge}
-                        style={{width:"100%", padding:"14px", borderRadius:14, border:"none",
-                          background:joinCode.length===6&&userName?C.blue:C.border,
-                          color:joinCode.length===6&&userName?"#fff":C.textLight,
-                          fontWeight:800, fontSize:18, cursor:"pointer", fontFamily:"inherit"}}>
-                        Join Challenge 🏆
-                      </button>
+                  {/* ACTIVITIES */}
+                  {challengeTab === "activities" && (
+                    <div>
+                      <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14}}>
+                        <div style={{fontSize:15, fontWeight:800, color:C.text}}>Garmin Activities (30 days)</div>
+                        <button onClick={fetchGarminActivities} style={{padding:"8px 14px", borderRadius:10, border:"none", background:activitiesSyncing?C.border:C.green, color:"#fff", fontWeight:800, fontSize:13, cursor:"pointer", fontFamily:"inherit"}}>
+                          {activitiesSyncing?"⏳ Loading...":"↻ Refresh"}
+                        </button>
+                      </div>
+                      {!fitConnected && (
+                        <div style={{background:C.blueLight, borderRadius:14, padding:16, marginBottom:14}}>
+                          <div style={{fontSize:14, fontWeight:800, color:C.blue, marginBottom:8}}>Connect Google Fit to import Garmin activities</div>
+                          <button onClick={signInWithGoogle} style={{width:"100%", padding:"12px", borderRadius:12, border:"none", background:C.blue, color:"#fff", fontWeight:800, fontSize:14, cursor:"pointer", fontFamily:"inherit"}}>Connect Google Fit</button>
+                        </div>
+                      )}
+                      {garminActivities.length === 0 && fitConnected && (
+                        <div style={{textAlign:"center", padding:"40px 20px", color:C.textLight}}>
+                          <div style={{fontSize:40, marginBottom:10}}>🏃</div>
+                          <div style={{fontSize:15, fontWeight:800, color:C.textMid, marginBottom:6}}>No activities loaded</div>
+                          <div style={{fontSize:13}}>Tap Refresh to load your Garmin activities</div>
+                        </div>
+                      )}
+                      {garminActivities.map(act => (
+                        <div key={act.id} style={{background:C.card, borderRadius:14, border:"1px solid "+C.border, padding:"14px 16px", marginBottom:10, display:"flex", alignItems:"center", justifyContent:"space-between"}}>
+                          <div>
+                            <div style={{fontSize:15, fontWeight:800, color:C.text}}>{act.name}</div>
+                            <div style={{fontSize:12, color:C.textLight, marginTop:2}}>{act.date} · {act.durationMins} min · {act.type}</div>
+                          </div>
+                          <button onClick={() => importActivityToWorkout(act)}
+                            style={{padding:"8px 14px", borderRadius:10, border:"none", background:C.blueLight, color:C.blue, fontWeight:800, fontSize:13, cursor:"pointer", fontFamily:"inherit", flexShrink:0}}>
+                            + Import
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
               );
             })()}
-
             {tab === "goals" && (
               <div style={{ animation: "fadeIn 0.2s ease" }}>
 
