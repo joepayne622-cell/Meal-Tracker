@@ -1461,13 +1461,15 @@
         const ch = challenges[challengeId];
         if (!ch) { showToast("Challenge not found", "error"); return; }
         if (!fitToken) { connectGoogleFitScopes(); return; }
+        if (!userId) { showToast("Please sign in first", "error"); return; }
         setFitSyncing(true);
         try {
           const now = Date.now();
-          // Start from midnight on the day the challenge was created
           const challengeDate = new Date(ch.createdAt);
           challengeDate.setHours(0, 0, 0, 0);
           const startMs = challengeDate.getTime();
+
+          // Fetch steps from Google Fit
           const body = {
             aggregateBy: [{ dataTypeName: "com.google.step_count.delta" }],
             bucketByTime: { durationMillis: 86400000 },
@@ -1498,37 +1500,47 @@
             });
             if (daySteps > 0) { dailyBreakdown[dayKey] = daySteps; totalSteps += daySteps; }
           });
-          // Match player key regardless of case
-          const existingPlayers = Object.keys(ch.players || {});
-          const matchedKey = existingPlayers.find(k => k.toLowerCase() === userName.toLowerCase()) || userName;
-          const writeRef = "challenges/" + challengeId + "/players/" + matchedKey;
-          await db.ref(writeRef + "/progress").set(totalSteps);
-          await db.ref(writeRef + "/lastSynced").set(Date.now());
-          await db.ref(writeRef + "/name").set(matchedKey);
-          if (Object.keys(dailyBreakdown).length > 0) {
-            await db.ref(writeRef + "/dailySteps").set(dailyBreakdown);
-          }
+
+          // Write under Firebase UID — ensure player entry exists first
+          const writeRef = "challenges/" + challengeId + "/players/" + userId;
+          const playerData = {
+            progress: totalSteps,
+            lastSynced: Date.now(),
+            name: userName,
+            email: userEmail,
+            photo: userPhoto || "",
+            uid: userId,
+            ...(Object.keys(dailyBreakdown).length > 0 ? { dailySteps: dailyBreakdown } : {}),
+          };
+          await db.ref(writeRef).update(playerData);
+
+          // Also register in userChallenges in case they joined via invite
+          await db.ref("userChallenges/" + userId + "/" + challengeId).set(true);
+
+          // Update local state
           setChallenges(prev => ({
             ...prev,
             [challengeId]: {
               ...prev[challengeId],
               players: {
                 ...prev[challengeId]?.players,
-                [matchedKey]: {
-                  ...prev[challengeId]?.players?.[matchedKey],
-                  progress: totalSteps, dailySteps: dailyBreakdown, lastSynced: Date.now(),
+                [userId]: {
+                  ...prev[challengeId]?.players?.[userId],
+                  ...playerData,
                 }
               }
             }
           }));
           setFitSteps(totalSteps);
+
           if (totalSteps === 0) {
-            showToast("Google Fit returned 0 steps — Garmin may not have synced yet. Check Google Fit app.", "error");
+            showToast("Got 0 steps from Google Fit — check that Garmin is synced to Google Fit app", "error");
           } else {
             showToast("Synced " + totalSteps.toLocaleString() + " steps! 🏃");
           }
         } catch (e) {
-          showToast("Sync failed — try reconnecting", "error");
+          console.error("Sync error:", e);
+          showToast("Sync failed — try reconnecting Google Fit", "error");
         }
         setFitSyncing(false);
       };
@@ -3084,9 +3096,12 @@
                         </div>
                       ) : myChallenges.map(ch => {
                         const players = Object.values(ch.players || {}).sort((a,b) => (b.progress||0)-(a.progress||0));
-                        const me = ch.players?.[userId];
+                        // Find me — try uid first, then email, then key
+                        const myEntry = ch.players?.[userId] || Object.values(ch.players||{}).find(p => p.uid===userId || p.email===userEmail);
+                        const me = myEntry;
                         const myProgress = me?.progress || 0;
-                        const opponent = players.find(p => p.uid !== userId);
+                        // Find opponent — anyone who isn't me
+                        const opponent = players.find(p => p.uid!==userId && p.email!==userEmail && (p.uid||p.email||p.name));
                         const oppProgress = opponent?.progress || 0;
                         const isMostWins = ch.mostWins || ch.type==="steps";
                         const maxProgress = Math.max(myProgress, oppProgress, 1);
