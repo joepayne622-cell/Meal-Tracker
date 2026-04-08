@@ -1056,15 +1056,25 @@
           provider.addScope("https://www.googleapis.com/auth/fitness.location.read");
           const result = await auth.signInWithPopup(provider);
           const token = result.credential?.accessToken;
+          console.log("Sign in result:", result.user?.email, "token:", !!token);
           if (token) {
             setFitToken(token);
             setFitConnected(true);
             localStorage.setItem("mt-fit-token", token);
             showToast("Signed in as " + result.user.displayName + " 👋");
             fetchAllFitData(token);
+          } else {
+            // Signed in but no Fit token — still works for challenges
+            showToast("Signed in as " + result.user.displayName + " 👋");
           }
         } catch(e) {
-          showToast("Sign in failed — try again", "error");
+          console.error("Sign in error:", e.code, e.message);
+          const msg = e.code === "auth/popup-blocked" ? "Popup blocked — allow popups for this site"
+            : e.code === "auth/popup-closed-by-user" ? "Sign in cancelled"
+            : e.code === "auth/unauthorized-domain" ? "Domain not authorized — check Firebase Auth settings"
+            : e.code === "auth/network-request-failed" ? "Network error — check connection"
+            : "Sign in failed: " + (e.code || e.message);
+          showToast(msg, "error");
         }
       };
 
@@ -1494,7 +1504,7 @@
 
       const showToast = (msg, type="success") => {
         setToast({ msg, type });
-        setTimeout(() => setToast(null), 2200);
+        setTimeout(() => setToast(null), type === "error" ? 5000 : 2200);
       };
 
       const dayEntries = entries[selectedDate] || [];
