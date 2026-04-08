@@ -1,4 +1,4 @@
-const CACHE_NAME = "macro-tracker-v26";
+const CACHE_NAME = "macro-tracker-v27";
 
 self.addEventListener("install", () => self.skipWaiting());
 
