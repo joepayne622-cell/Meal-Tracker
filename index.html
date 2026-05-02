@@ -131,9 +131,11 @@ const{useState,useEffect,useRef}=React;const STORAGE_KEY="macro-tracker-data-v2"
         const isRunning = ch.type==="running";
         const isFloat = isCalories||isActive||isRunning;
         // For calories: aggregate both expended + activity calories
+        // com.google.active_calories.expended doesn't exist in Fit API
+        // Use calories.expended (Garmin syncs active calories here) + active_minutes together
         const aggregateBy = isCalories
-          ? [{dataTypeName:"com.google.calories.expended"},{dataTypeName:"com.google.active_calories.expended"}]
-          : isActive ? [{dataTypeName:"com.google.active_minutes"}]
+          ? [{dataTypeName:"com.google.calories.expended"}]
+          : isActive ? [{dataTypeName:"com.google.active_minutes"},{dataTypeName:"com.google.activity.segment"}]
           : isRunning ? [{dataTypeName:"com.google.distance.delta"}]
           : [{dataTypeName:"com.google.step_count.delta"}];
         const body={aggregateBy,bucketByTime:{durationMillis:HOUR},startTimeMillis:startMs,endTimeMillis:now};
